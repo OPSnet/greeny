@@ -3,27 +3,58 @@
 
 #include <stdbool.h>
 
+enum anb_error {
+	ANB_OK = 0,
+	ANB_ERR_OOM,
+	ANB_ERR_FS,
+	ANB_ERR_WRONG_BENCODE_TYPE,
+	ANB_ERR_WRONG_TRANSFORM_OPERATION,
+	// represents BEN errors 1, 2, 4. Ben error 0 is ANB_OK, 3 is ANB_ERR_OOM
+	ANB_ERR_BENCODE_SYNTAX,
+};
+
+enum anb_error ben_error_to_anb(int bencode_error);
+char *anb_error_to_human(enum anb_error *out_err);
+
 enum anb_operation {
 	ANB_TRANSFORM_DELETE,
-	ANB_TRANSFORM_SET,
-	ANB_TRANSFORM_REPLACE,
+	ANB_TRANSFORM_SET_STRING,
+	ANB_TRANSFORM_SUBSTITUTE,
 };
 
 // represents any sort of bulk transform to occur
 struct anb_transform {
-	char *key; // I hope we don't need anything longer than this
+	/**
+	 * Null-terminated list of strings representing dictionary keys.
+	 * It should point to the dictionary object that *contains* what is to be modified
+	 * for all operations except for substitute, because substitute works entirely on
+	 * the value itself. The key may also just be NULL right away
+	 */
+	char **key;
 	enum anb_operation operation;
-	union payload {
-		// ANB_TRANSFORM_DELETE: leave uninitialized
-		// ANB_TRANSFORM_SET: set this:
-		char *set;
-		// ANB_TRANSFORM_REPLACE: set this:
-		struct subst {
+	union anb_transform_payload {
+		struct anb_op_delete {
+			char *key;
+		} delete_;
+
+		struct anb_op_set_string {
+			char *key;
+			char *val;
+		} set_string;
+
+		struct anb_op_set_bool {
+			char *key;
+			bool val;
+		} set_bool;
+
+		struct anb_op_substitute {
 			char *find;
 			char *replace;
-		};
-	};
+		} substitute;
+	} payload;
 };
+
+void anb_transform_free(struct anb_transform *transform, enum anb_error *out_err);
 
 struct anb_callback_arg {
 	// progress bar info
@@ -46,11 +77,10 @@ struct anb_main_arg {
 	// bool transmission;
 	// bool qbittorrent;
 	// bool rtorrent;
-	anb_transform *transforms;
+	struct anb_transform *transforms;
 	int transforms_n;
-	struct anb_upload
 	void *callback_ctx;
-	int callback(struct anb_callback_arg callback_arg, void *ctx);
+	int (*callback)(struct anb_callback_arg callback_arg, void *ctx);
 };
 
 typedef struct {
@@ -68,7 +98,7 @@ typedef struct {
  * @param main_args information gathered from a cli or gui
  * @return 0 on fail, nonzero on success
  */
-int anb_main(anb_main_arg args);
+int anb_main(struct anb_main_arg args);
 
 /** 
  * @param transforms list of transforms to perform
@@ -76,9 +106,8 @@ int anb_main(anb_main_arg args);
  * @param buffer a pointer to the pointer to the buffer to perform the transform on, and which will be
  * set to the modified buffer. The buffer passed in might be free()-ed, memcpy if you care about it.
  * @param buffer_n the length of the buffer, will be updated if modified
- * @return 0 = success, nonzero = fail
  */
-int anb_transform_buffer(anb_transform *transforms, int transforms_n, char **buffer, int *buffer_n);
+void anb_transform_buffer(struct anb_transform *transforms, int transforms_n, char **buffer, size_t *buffer_n, enum anb_error *out_err);
 
 /**
  * @param recurse whether to recurse into subdirectories. Will go one level by default.
