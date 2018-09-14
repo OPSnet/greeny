@@ -1,6 +1,7 @@
 #ifndef H_LIBANNOUNCEBULK
 #define H_LIBANNOUNCEBULK
 
+#include <stdio.h>
 #include <stdbool.h>
 #include "vector.h"
 
@@ -61,19 +62,71 @@ struct grn_transform_result {
 	char error[64];
 };
 
-struct grn_main_arg {
-	// bool recurse;
-	// NULL terminated
-	char **paths;
-	// bool deluge;
-	// bool transmission;
-	// bool qbittorrent;
-	// bool rtorrent;
-	// NULL terminated
+enum grn_ctx_state {
+	GRN_CTX_UNSEALED = 0,
+	GRN_CTX_READ,
+	GRN_CTX_TRANSFORM,
+	GRN_CTX_WRITE,
+	GRN_CTX_DONE,
+}
+
+struct grn_ctx {
 	struct grn_transform *transforms;
-	void *callback_ctx;
-	int (*callback)(struct grn_callback_arg callback_arg, void *ctx);
+	int transforms_n;
+	vector *files_v; // only used while unsealed
+	char **files;
+	int *file_errors; // non-fatal errors for each individual file
+	int files_c; // index to the currently processing file
+	int files_n;
+	int state; // represents what to do next (sometimes this coincides with what is in progress)
+	FILE *fh;
+	char *buffer;
+	size_t buffer_n;
 };
+
+/**
+ * Allocate a new context.
+ * @param ctx A newly created greeny context to prepare
+ */
+void grn_ctx_alloc(struct grn_ctx *ctx, int *out_err);
+
+/**
+ * Free a context
+ * @param ctx a greeny context.
+ */
+void grn_ctx_free(struct grn_ctx *ctx, int *out_err);
+
+/**
+ * Prepare a context for execution once all files have been added
+ * @param ctx a greeny context
+ */
+void grn_ctx_seal(struct grn_ctx *ctx, int *out_err);
+
+// WARNING: if any of the next few context processing functions fail, run grn_ctx_free and abort.
+// all errors are fatal.
+
+/**
+ * Perform work on a context until a non-blocking operation is started.
+ * Essentially, does the minimum amount of work until a non-blocking operation can begin.
+ * Should be used in a high-frequency loop.
+ * @param ctx a grn context
+ * @return whether the context is done being processed
+ */
+bool grn_one_step(struct grn_ctx *ctx, int *out_err);
+
+/**
+ * Continue processing a context until a file is complete.
+ * Repeatedly calls grn_one_step internally.
+ * @param ctx a grn context
+ * @return whether the context is done being processed
+ */
+bool grn_one_file(struct grn_ctx *ctx, int *out_err);
+
+/**
+ * Process a context until completion.
+ * @param ctx a grn context
+ */
+void grn_one_context(struct grn_ctx *ctx, int *out_err);
 
 typedef struct {
 	char *path;

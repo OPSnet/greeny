@@ -62,6 +62,42 @@ static void write_file(FILE *fh, void *buffer, size_t buffer_n, int *out_err) {
 
 // BEGIN custom data type operations
 
+void grn_ctx_alloc(struct grn_ctx *ctx, int *out_err) {
+	// sets error to zero, etc
+	*ctx = { 0 };
+	ctx->files_v = vector_alloc(out_err);
+	ERR_FW();
+	RETURN_OK();
+}
+
+void grn_ctx_seal(struct grn_ctx *ctx, int *out_err) {
+	// null terminate that shit.
+	vector_push(ctx->files_v, NULL, out_err);
+	ERR_FW();
+	ctx->files_v = NULL;
+	int vector_n = 0;
+	ctx->files = vector_export(ctx->files_v, &vector_n, out_err);
+	ERR_FW();
+	ctx->c_file = *ctx->files;
+	ctx->state = GRN_CTX_READ;
+	RETURN_OK();
+}
+
+void grn_ctx_free(struct grn_ctx *ctx, int *out_err) {
+	if (ctx->state == GRN_CTX_UNSEALED) {
+		vector_free(ctx->files_v);
+		RETURN_OK();
+	}
+	free(ctx->files);
+	if (ctx->buffer != NULL) {
+		free(ctx->buffer);
+	}
+	if (ctx->fh != NULL) {
+		ERR(fclose(ctx->fh), GRN_ERR_FS);
+	}
+	RETURN_OK();
+}
+
 char *grn_error_to_string(int error) {
 	static char *err_strings[] = {
 		"Successful.",
@@ -301,6 +337,87 @@ void grn_transform_buffer(struct grn_transform *transforms, int transforms_n, ch
 	RETURN_OK();
 }
 
+/**
+ * Truncates the file and opens in writing mode.
+ */
+static void freopen_ctx(struct grn_ctx *ctx, int *out_err) {
+	*out_err = ANB_OK;
+	// it will get fclosed by the caller with grn_ctx_free
+	ERR(freopen(NULL, ctx->fh, "w"), ANB_ERR_FS);
+}
+
+static void next_file_ctx(struct grn_ctx *ctx, int *out_err) {
+	*out_err = ANB_OK;
+
+	// close the previously processing file
+	if (ctx->fh) {
+		ERR(fclose(ctx->fh), ANB_ERR_FS);
+	}
+
+	ctx->files_c++;
+	// are we done?
+	if (ctx->files_c >= ctx->files_n) {
+		ctx->state = GRN_CTX_DONE;
+		return;
+	}
+
+	// prepare the next file for reading
+	ERR(ctx->fh = fopen(ctx->files[ctx->files_c], "r"), ANB_ERR_FS);
+}
+
+// BEGIN mainish functions
+
+bool grn_one_step(struct grn_ctx *ctx, int *out_err) {
+	*out_err = ANB_OK;
+	switch (ctx->state) {
+		case GRN_CTX_DONE:
+			return true;
+			break;
+		case GRN_CTX_UNSEALED:
+			*out_err = GRN_ERR_WRONG_CTX_STATE;
+			return false;
+			break;
+		case GRN_CTX_READ:
+			// means we should continue reading the current file
+			// fread_ctx will only "throw" an error if it's not an FS problem (which indicates file specific problem).
+			bool more_reading = fread_ctx(ctx, out_err);
+			// fuckin macros
+			if (*out_err) {
+				// mostly just to be safe, since we don't reassign later it would probably be ok without this.
+				return false;
+			}
+			if (!more_reading) {
+				ctx->state = GRN_CTX_TRANSFORM;
+			}
+			return false;
+			// TODO: once we add non-blocking, call grn_one_step again here
+			break;
+		case GRN_CTX_WRITE:
+			bool more_writing = fwrite_ctx(ctx, out_err);
+			if (*out_err) {
+				return false;
+			}
+			if (!more_writing) {
+				next_file_ctx(ctx, out_err);
+				if (*out_err) {
+					return false;
+				}
+				if (ctx->state == GRN_CTX_DONE) {
+					return true;
+				}
+				// TODO: call grn_one_step
+			}
+			return false;
+			break;
+		case GRN_CTX_TRANSFORM:
+			transform_buffer(ctx, out_err);
+			ctx->state = GRN_CTX_WRITE;
+			// TODO: run grn_one_step again
+			return false;
+			break;
+	}
+}
+
 /*
 int grn_main(struct grn_main_arg arg) {
 	// Find all the file paths we will be using: todo.
@@ -342,3 +459,5 @@ int grn_main(struct grn_main_arg arg) {
 	return 1;
 }
 */
+
+// END mainish functions
