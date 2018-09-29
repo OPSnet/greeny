@@ -6,7 +6,7 @@
 #include "vector.h"
 
 int ben_error_to_anb(int bencode_error);
-char *grn_error_to_human(int *out_err);
+char *grn_err_to_string(int err);
 
 enum grn_operation {
 	GRN_TRANSFORM_DELETE,
@@ -68,12 +68,12 @@ enum grn_ctx_state {
 	GRN_CTX_TRANSFORM,
 	GRN_CTX_WRITE,
 	GRN_CTX_DONE,
-}
+};
 
 struct grn_ctx {
 	struct grn_transform *transforms;
 	int transforms_n;
-	vector *files_v; // only used while unsealed
+	struct vector *files_v; // only used while unsealed
 	char **files;
 	int *file_errors; // non-fatal errors for each individual file
 	int files_c; // index to the currently processing file
@@ -140,10 +140,14 @@ typedef struct {
 } grn_file;
 
 /**
- * @param main_args information gathered from a cli or gui
- * @return 0 on fail, nonzero on success
+ * @param vec the vector to add files to (see <vector.h>)
+ * @param path a file or directory
+ * @param extension the file extension of torrents. If NULL, uses ".torrent". Does not apply to single files; only when searching directories
+ * If a filesystem error is encountered (unreadable and nonexistant files, for example) this function will set out_err to GRN_ERR_FS
+ * but attempt to continue and return an accurate value anyway.
  */
-int grn_main(struct grn_main_arg args);
+void grn_cat_torrent_files(struct vector *vec, const char *path, const char *extension, int *out_err);
+
 
 /** 
  * @param transforms list of transforms to perform
@@ -205,7 +209,7 @@ void grn_set_announce_buffer(char *to, grn_file file);
  * @return a NULL-terminated array of pointers to transforms
  */
 struct grn_transform *grn_new_announce_substitution_transform(const char *find, const char *replace);
-struct grn_transform *grn_orpheus_transforms;
+struct grn_transform grn_orpheus_transforms[];
 
 // END
 

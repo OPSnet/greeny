@@ -5,7 +5,7 @@
 
 struct vector *vector_alloc(int *out_err) {
 	struct vector *to_return;
-	to_return = malloc(sizeof(vector));
+	to_return = malloc(sizeof(struct vector *));
 	ERR_NULL(!to_return, GRN_ERR_OOM);
 	to_return->buffer = malloc(sizeof(void *));
 	ERR_NULL(!to_return->buffer, GRN_ERR_OOM);
@@ -19,7 +19,7 @@ void vector_free(struct vector *free_me) {
 	free(free_me);
 }
 
-void vector_push(void *push_me, struct vector *vector, int *out_err) {
+void vector_push(struct vector *vector, void *push_me, int *out_err) {
 	vector->used_n++;
 	if (vector->used_n > vector->allocated_n) {
 		vector->allocated_n *= 2;
@@ -29,6 +29,10 @@ void vector_push(void *push_me, struct vector *vector, int *out_err) {
 	vector->buffer[vector->used_n - 1] = push_me;
 	RETURN_OK();
 }
+
+size_t vector_length(const struct vector *vector) {
+	return vector->used_n;
+};
 
 void **vector_export(struct vector *vector, int *n, int *out_err) {
 	*n = vector->used_n;

@@ -1,66 +1,101 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
+#include <getopt.h>
 
-#include "../contrib/dropt.h"
 #include "libannouncebulk.h"
 #include "vector.h"
 
-char *version_text = "GREENY, Greeny Really Enjoys Editing torreNts, Yup!\n"
+char version_text[] = "GREENY, the Graphical, Really Easy Editor for torreNts, Yup!\n"
 	"You are using the GREENY command line interface, version PRE_ALPHA\n"
 	"This software's copyright is assigned to the public domain.\n";
-char *help_text = "USAGE:\n"
+char help_text[] = "USAGE:\n"
 	"\n"
 	"greeny [ OPTIONS ] [ -- ] input_file_1 input_file\n"
 	"If no options are specified, --orpheus is assumed. This behavior may be removed in a later version.\n"
 	"\n"
-	"OPTIONS:\n";
+	"OPTIONS:\n"
+	"\n"
+	"  -h               Show this help text.\n"
+	"  -v               Show the version.\n"
+	"  -t               Specify a custom transform.\n"
+	"\n"
+	"  --orpheus        Use the preset to transform for Orpheus. This is the default.\n"
+	"\n"
+	"  --qbittorrent    Transform qbittorrent files in-place.\n"
+	"  --qbit           ditto.\n"
+	"  --deluge         Ditto for deluge.\n"
+	"  --transmission   Ditto for transmission.\n"
+	"  --rtorrent       Ditto for rtorrent.\n";
 
 int main(int argc, char **argv) {
-	grn_main_arg main_arg = { 0 };
-	dropt_bool flag_help, flag_version;
-	dropt_option cli_opts[] = {
-		{ 'h', "help", "Shows help", NULL, dropt_handle_bool, &flag_help, dropt_attr_halt },
-		{ 'v', "version", "Shows version and author information.", NULL, dropt_handle_bool, &flag_version, dropt_attr_halt },
+	int in_err;
+
+	bool qbittorrent;
+
+	char shortopts[] = "t:hv";
+	struct option longopts[] = {
 		{ 0 },
 	};
-	dropt_context *dropt_ctx = dropt_new_context(cli_opts);
-	if (dropt_ctx == NULL) {
-		puts("Dropt initialization error");
-		return 1;
-	}
-	if (argc < 1) {
-		puts("You're running this in some really strange environment without a single CLI option!");
-		return 1;
-	}
-	char **extra_args = dropt_parse(dropt_ctx, -1, &argv[1]);
-	if (dropt_get_error(dropt_ctx) != dropt_error_none) {
-		printf("CLI error: %s\n", dropt_get_error_message(dropt_ctx));
-		return 1;
+
+	struct vector *files = vector_alloc(&in_err);
+	if (in_err) goto cleanup_err;
+	struct grn_ctx ctx;
+	grn_ctx_alloc(&ctx, &in_err);
+	if (in_err) goto cleanup_err;
+
+	int opt_c = 0;
+	while (opt_c = getopt_long(argc, argv, shortopts, longopts, NULL) != -1) {
+		switch ((char)opt_c) {
+			// unknown option
+			case '?':;
+				goto cleanup_ok;
+				break;
+			case 't':;
+				puts("Not implemented yet.");
+				break;
+			case 'h':;
+				printf(help_text);
+				goto cleanup_ok;
+				break;
+			case 'v':;
+				printf(version_text);
+				goto cleanup_ok;
+				break;
+			// other might mean 0, for a long opt. No need to handle it.
+		}
 	}
 
-	if (flag_help) {
-		puts(help_text);
-		dropt_print_help(stdout, dropt_ctx, NULL);
-		return 0;
-	}
-	if (flag_version) {
-		puts(version_text);
-		return 0;
+	// add normal files
+	for (; optind < argc; optind++) {
+		printf("Adding %s and subdirectories.\n", argv[optind]);
+		grn_cat_torrent_files(files, argv[optind], NULL, &in_err);
+		if (in_err) goto cleanup_err;
 	}
 
-	// all non-file arguments have been passed, gogogo!
-	if (*extra_args == NULL) {
-		puts("You must specify at least one file/folder to process.");
-		return 1;
+	int files_n = vector_length(files);
+	if (files_n == 0) {
+		puts("No files to transform.");
+		return 0;
 	}
-	main_arg.paths = extra_args;
+	printf("About to process %d files.\n", files_n);
 
 	// TODO: only proceed if no custom transforms specified.
 	if (true) {
-		
+		// TODO: add the default arguments
 	}
 
-	puts("no args passed.");
+	puts("Transformations complete without error. Thank greeny.");
 	return 0;
+
+	cleanup_err:
+		puts(grn_err_to_string(in_err));
+		vector_free(files);
+		grn_ctx_free(&ctx, &in_err);
+		return 1;
+
+	cleanup_ok:
+		vector_free(files);
+		grn_ctx_free(&ctx, &in_err);
+		return 0;
 };
