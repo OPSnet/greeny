@@ -5,15 +5,15 @@
 #include <stdbool.h>
 #include "vector.h"
 
-int ben_error_to_anb(int bencode_error);
-char *grn_err_to_string(int err);
+int ben_error_to_anb( int bencode_error );
+char *grn_err_to_string( int err );
 
 enum grn_operation {
 	GRN_TRANSFORM_DELETE,
 	GRN_TRANSFORM_SET_STRING,
 	GRN_TRANSFORM_SUBSTITUTE,
 };
-enum grn_operation grn_human_to_operation(char *human, int *out_err);
+enum grn_operation grn_human_to_operation( char *human, int *out_err );
 
 // represents any sort of bulk transform to occur
 struct grn_transform {
@@ -47,7 +47,7 @@ struct grn_transform {
 	} payload;
 };
 
-void grn_transform_free(struct grn_transform *transform, int *out_err);
+void grn_transform_free( struct grn_transform *transform, int *out_err );
 
 struct grn_callback_arg {
 	// progress bar info
@@ -63,9 +63,10 @@ struct grn_transform_result {
 };
 
 enum grn_ctx_state {
-	GRN_CTX_UNSEALED = 0,
+	GRN_CTX_NEXT,
 	GRN_CTX_READ,
 	GRN_CTX_TRANSFORM,
+	GRN_CTX_REOPEN,
 	GRN_CTX_WRITE,
 	GRN_CTX_DONE,
 };
@@ -73,7 +74,6 @@ enum grn_ctx_state {
 struct grn_ctx {
 	struct grn_transform *transforms;
 	int transforms_n;
-	struct vector *files_v; // only used while unsealed
 	char **files;
 	int *file_errors; // non-fatal errors for each individual file
 	int files_c; // index to the currently processing file
@@ -84,23 +84,17 @@ struct grn_ctx {
 	size_t buffer_n;
 };
 
-/**
- * Allocate a new context.
- * @param ctx A newly created greeny context to prepare
- */
-void grn_ctx_alloc(struct grn_ctx *ctx, int *out_err);
+struct grn_ctx *grn_ctx_alloc( int *out_err );
+void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n );
+void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files );
+void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transforms, int transforms_n );
+void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms, int *out_err );
 
 /**
  * Free a context
  * @param ctx a greeny context.
  */
-void grn_ctx_free(struct grn_ctx *ctx, int *out_err);
-
-/**
- * Prepare a context for execution once all files have been added
- * @param ctx a greeny context
- */
-void grn_ctx_seal(struct grn_ctx *ctx, int *out_err);
+void grn_ctx_free( struct grn_ctx *ctx, int *out_err );
 
 // WARNING: if any of the next few context processing functions fail, run grn_ctx_free and abort.
 // all errors are fatal.
@@ -112,7 +106,7 @@ void grn_ctx_seal(struct grn_ctx *ctx, int *out_err);
  * @param ctx a grn context
  * @return whether the context is done being processed
  */
-bool grn_one_step(struct grn_ctx *ctx, int *out_err);
+bool grn_one_step( struct grn_ctx *ctx, int *out_err );
 
 /**
  * Continue processing a context until a file is complete.
@@ -120,13 +114,13 @@ bool grn_one_step(struct grn_ctx *ctx, int *out_err);
  * @param ctx a grn context
  * @return whether the context is done being processed
  */
-bool grn_one_file(struct grn_ctx *ctx, int *out_err);
+bool grn_one_file( struct grn_ctx *ctx, int *out_err );
 
 /**
  * Process a context until completion.
  * @param ctx a grn context
  */
-void grn_one_context(struct grn_ctx *ctx, int *out_err);
+void grn_one_context( struct grn_ctx *ctx, int *out_err );
 
 typedef struct {
 	char *path;
@@ -140,77 +134,28 @@ typedef struct {
 } grn_file;
 
 /**
+ * Adds .torrent files to a vector. The paths will all be dynamically allocated.
  * @param vec the vector to add files to (see <vector.h>)
  * @param path a file or directory
  * @param extension the file extension of torrents. If NULL, uses ".torrent". Does not apply to single files; only when searching directories
  * If a filesystem error is encountered (unreadable and nonexistant files, for example) this function will set out_err to GRN_ERR_FS
  * but attempt to continue and return an accurate value anyway.
  */
-void grn_cat_torrent_files(struct vector *vec, const char *path, const char *extension, int *out_err);
+void grn_cat_torrent_files( struct vector *vec, const char *path, const char *extension, int *out_err );
 
-
-/** 
- * @param transforms list of transforms to perform
- * @param transforms_n number of transforms to perform
- * @param buffer a pointer to the pointer to the buffer to perform the transform on, and which will be
- * set to the modified buffer. The buffer passed in might be free()-ed, memcpy if you care about it.
- * @param buffer_n the length of the buffer, will be updated if modified
- */
-void grn_transform_buffer(struct grn_transform *transforms, int transforms_n, char **buffer, size_t *buffer_n, int *out_err);
+// BEGIN transform catting
+// ONE DAY, we will have a proper vector implementation that can just append a whole buffer to itself
+// but then, how do you handle freeing the elements, if you have no idea how they were allocated?
+// (after all, the buffer those items were added from is unknown!)
 
 /**
- * @param recurse whether to recurse into subdirectories. Will go one level by default.
- * @param in_paths array of paths to read from
- * @param in_paths_n number of paths to read from
- * @param out_paths_n number of paths outputted.
- * @return array of fully qualified file paths. We allocate it, free with `free`
- * Possible modifications:
- *  - Why not use a NULL-terminated array of arrays?
- *  - Custom recursion level
+ * Adds the orpheus default transforms to the list.
+ * They will be dynamically allocated.
+ * @param vec the list of transforms to append to
  */
-char **grn_find_torrents(bool recurse, grn_user_path *in_paths, int in_paths_n, int *out_paths_n);
-
-/**
- * @param path the path to the torrent file on-disk
- * @return the file with contents read
- */
-grn_file grn_read_file(char* path);
-
-/**
- * @param file the file to write to disk
- * @return whether the writing was sucessful
- */
-bool grn_write_file(grn_file file);
-
-/**
- * @param file the file to free
- */
-void grn_free_file(grn_file file);
-
-/**
- * @param from the text to remove
- * @param to the text to replace the removed text with
- * @param file the file to perform the replacement on. Does not write to disk, only modifies buffer
- */
-void grn_replace_announce_buffer(char *from, char *to, grn_file file);
-
-/**
- * @param to what to set the announce to
- * @param file file to perform set inside of
- * If currently a list, it will be set to a string.
- */
-void grn_set_announce_buffer(char *to, grn_file file);
-
-// BEGIN preset and semi-preset transforms
-
-/**
- * @param find text to find
- * @param replace text to replace found text with
- * @return a NULL-terminated array of pointers to transforms
- */
-struct grn_transform *grn_new_announce_substitution_transform(const char *find, const char *replace);
-struct grn_transform grn_orpheus_transforms[];
+void grn_cat_transforms_orpheus( struct vector *vec, int *out_err );
 
 // END
 
 #endif
+
