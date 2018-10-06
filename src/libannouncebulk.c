@@ -21,7 +21,7 @@
 
 // BEGIN context filesystem
 
-static void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
+void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	// we can't just do fread(buffer, 1, some_massive_num, fh) because we can't be sure whether
@@ -38,7 +38,7 @@ static void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
 	}
 }
 
-static void fwrite_ctx( struct grn_ctx *ctx, int *out_err ) {
+void fwrite_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	ERR( fwrite( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1, GRN_ERR_FS );
@@ -147,11 +147,11 @@ void grn_transform_free( struct grn_transform *transform, int *out_err ) {
 // BEGIN preset and semi-presets
 
 
-static char *announce_str_key[] = {
+char *announce_str_key[] = {
 	"announce",
 	NULL,
 };
-static char *announce_list_key[] = {
+char *announce_list_key[] = {
 	"announce-list",
 	NULL,
 };
@@ -213,7 +213,7 @@ struct grn_transform *grn_new_announce_substitution_transform( const char *find,
 // END preset and semi-presets
 
 // returns dynamically allocated
-static char *strsubst( const char *haystack, const char *find, const char *replace, int *out_err ) {
+char *strsubst( const char *haystack, const char *find, const char *replace, int *out_err ) {
 	char *to_return;
 
 	// no need to be fast about it.
@@ -245,7 +245,7 @@ static char *strsubst( const char *haystack, const char *find, const char *repla
 	RETURN_OK( to_return );
 }
 
-static void ben_str_subst( struct bencode *haystack, char *find, char *replace, int *out_err ) {
+void ben_str_subst( struct bencode *haystack, char *find, char *replace, int *out_err ) {
 	ERR( haystack->type != BENCODE_STR, GRN_ERR_WRONG_BENCODE_TYPE );
 	char *substituted = strsubst( ben_str_val( haystack ), find, replace, out_err );
 	ERR_FW();
@@ -261,7 +261,7 @@ static void ben_str_subst( struct bencode *haystack, char *find, char *replace, 
  * @param needle the string haystack should end with
  * @return true if haystack ends with needle
  */
-static bool str_ends_with( const char *haystack, const char *needle ) {
+bool str_ends_with( const char *haystack, const char *needle ) {
 	int haystack_n = strlen( haystack );
 	int needle_n = strlen( needle );
 	const char *haystack_suffix = haystack + haystack_n - needle_n;
@@ -270,7 +270,7 @@ static bool str_ends_with( const char *haystack, const char *needle ) {
 
 // this will have undefined behavior if there are null bytes in the string
 // let's be honest though, it will just truncate it after the first null byte
-static void ben_substitute( struct bencode *ben, char *find, char *replace, int *out_err ) {
+void ben_substitute( struct bencode *ben, char *find, char *replace, int *out_err ) {
 	if ( ben->type == BENCODE_STR ) {
 		ben_str_subst( ben, find, replace, out_err );
 		ERR_FW();
@@ -348,14 +348,14 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 /**
  * Truncates the file and opens in writing mode.
  */
-static void freopen_ctx( struct grn_ctx *ctx, int *out_err ) {
+void freopen_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	// it will get fclosed by the caller with grn_ctx_free
 	ctx->fh = freopen( NULL, "w", ctx->fh );
 	ERR( ctx->fh == NULL, GRN_ERR_FS );
 }
 
-static void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
+void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	// close the previously processing file
@@ -468,11 +468,11 @@ void grn_one_ctx( struct grn_ctx *ctx, int *out_err ) {
 
 
 // global because nftw doesn't support a custom callback argument
-static struct vector *cat_vec;
-static const char *cat_ext;
+struct vector *cat_vec;
+const char *cat_ext;
 
 // used as nftw callback below
-static int cat_nftw_cb( const char *path, const struct stat *st, int file_type, struct FTW *ftw_info ) {
+int cat_nftw_cb( const char *path, const struct stat *st, int file_type, struct FTW *ftw_info ) {
 	int in_err;
 
 	// ignore non-files and files without the correct extension

@@ -5,15 +5,26 @@ sources_common := contrib/bencode.o src/libannouncebulk.o src/vector.o
 
 headers_cli    := $(headers_common)
 sources_cli    := $(sources_common) src/cli.o
-binary_cli     := greeny-cli
+binary_cli     := ./greeny-cli
 LIBS_cli       := 
 
+headers_test   := $(headers_common)
+sources_test   := $(sources_common) tests/test.c
+binary_test    := ./test-greeny
+LIBS_test      := -lcmocka
+
 all: $(binary_cli)
+
+test: $(binary_test)
+	$(binary_test)
 
 $(binary_cli) : $(sources_cli) $(headers_cli)
 	$(CC) -o $(binary_cli) $(LIBS_cli) $(sources_cli)
 
-clean:
-	rm -f */*.o $(binary_cli)
+$(binary_test) : $(sources_test) $(headers_test)
+	$(CC) -o $(binary_test) $(LIBS_test) $(sources_test)
 
-.PHONY: clean
+clean:
+	rm -f */*.o $(binary_cli) $(binary_test)
+
+.PHONY: all test clean
