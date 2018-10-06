@@ -30,7 +30,7 @@ void vector_free( struct vector *free_me ) {
 
 void vector_free_all( struct vector *free_me ) {
 	for ( int i = 0; i < vector_length( free_me ); i++ ) {
-		free( free_me->buffer + i );
+		free( free_me->buffer[i] );
 	}
 	vector_free( free_me );
 }
@@ -60,7 +60,7 @@ void vector_push_all( struct vector *vector, void **push_me, int push_me_n, int 
 
 size_t vector_length( const struct vector *vector ) {
 	return vector->used_n;
-};
+}
 
 void **vector_export( struct vector *vector, int *n ) {
 	*n = vector->used_n;
@@ -68,14 +68,14 @@ void **vector_export( struct vector *vector, int *n ) {
 	return to_return;
 }
 
-void *grn_flatten_ptrs (void **ptrs, int ptrs_n, int sz, int *out_err) {
+void *grn_flatten_ptrs( void **ptrs, int ptrs_n, int sz, int *out_err ) {
 	*out_err = GRN_OK;
 
-	void *to_return = malloc(ptrs_n * sz);
-	ERR_NULL(to_return == NULL, GRN_ERR_OOM);
-	for (int i = 0; i < ptrs_n; i++) {
-		void *to_return_with_off = (void *)(((char *)to_return) + sz * i);
-		memcpy(to_return_with_off, ptrs[i], sz);
+	void *to_return = malloc( ptrs_n * sz );
+	ERR_NULL( to_return == NULL, GRN_ERR_OOM );
+	for ( int i = 0; i < ptrs_n; i++ ) {
+		void *to_return_with_off = ( void * )( ( ( char * )to_return ) + sz * i );
+		memcpy( to_return_with_off, ptrs[i], sz );
 	}
 	return to_return;
 }

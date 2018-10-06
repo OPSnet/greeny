@@ -133,6 +133,19 @@ typedef struct {
 	int buffer_n;
 } grn_file;
 
+// BEGIN client-specific
+
+enum grn_torrent_client {
+	GRN_CLIENT_QBITTORENT,
+	GRN_CLIENT_DELUGE,
+	GRN_CLIENT_TRANSMISSION,
+	GRN_CLIENT_TRANSMISSION_DAEMON,
+};
+
+void grn_cat_client( struct vector *vec, int client, int *out_err );
+
+// END client-specific
+
 /**
  * Adds .torrent files to a vector. The paths will all be dynamically allocated.
  * @param vec the vector to add files to (see <vector.h>)

@@ -1,7 +1,4 @@
-CFLAGS := $(CFLAGS) -Icontrib -Isrc -Wall --std=c99
-ifdef GRN_DEBUG
-	CFLAGS := $(CFLAGS) -g
-endif
+CFLAGS := $(CFLAGS) -Icontrib -Wall --std=c99
 
 headers_common := contrib/bencode.h src/libannouncebulk.h src/err.h src/vector.h
 sources_common := contrib/bencode.o src/libannouncebulk.o src/vector.o

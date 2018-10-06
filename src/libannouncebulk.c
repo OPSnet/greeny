@@ -5,13 +5,14 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
+#include <unistd.h>
 #include <ftw.h>
+#include <bencode.h>
 
 #include "libannouncebulk.h"
 #include "vector.h"
 #include "err.h"
 // are you supposed to do this?
-#include "../contrib/bencode.h"
 
 // BEGIN macros
 
@@ -35,7 +36,7 @@ static void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
 		free( ctx->buffer );
 		ERR( GRN_ERR_FS );
 	}
-};
+}
 
 static void fwrite_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
@@ -89,8 +90,8 @@ void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms, i
 
 	// THE TRANSFORMS ARE NOT IN CONTIGUOUs MEMORY ONLY THE POINTERS AHHHHH// THE TRANSFORMS ARE NOT IN CONTIGUOUs MEMORY ONLY THE POINTERS AHHHHH// THE TRANSFORMS ARE NOT IN CONTIGUOUs MEMORY ONLY THE POINTERS AHHHHH
 	// ^^^ i'm not sure what key i hit to duplicate it but i think i will let it stay
-	struct grn_transform **ptrs = (struct grn_transform **) vector_export( transforms, &ctx->transforms_n );
-	ctx->transforms = grn_flatten_ptrs((void **)ptrs, ctx->transforms_n, sizeof (struct grn_transform), out_err);
+	struct grn_transform **ptrs = ( struct grn_transform ** ) vector_export( transforms, &ctx->transforms_n );
+	ctx->transforms = grn_flatten_ptrs( ( void ** )ptrs, ctx->transforms_n, sizeof( struct grn_transform ), out_err );
 	ERR_FW();
 }
 
@@ -162,7 +163,7 @@ void grn_cat_transforms_orpheus( struct vector *vec, int *out_err ) {
 	ERR( key_subst == NULL, GRN_ERR_OOM );
 	*key_subst = ( struct grn_transform ) {
 		.key = announce_str_key,
-		.operation = GRN_TRANSFORM_SUBSTITUTE,
+		 .operation = GRN_TRANSFORM_SUBSTITUTE,
 		.payload = {
 			.substitute = {
 				"apollo.rip",
@@ -174,7 +175,7 @@ void grn_cat_transforms_orpheus( struct vector *vec, int *out_err ) {
 	ERR( list_subst == NULL, GRN_ERR_OOM );
 	*list_subst = ( struct grn_transform ) {
 		.key = announce_list_key,
-		.operation = GRN_TRANSFORM_SUBSTITUTE,
+		 .operation = GRN_TRANSFORM_SUBSTITUTE,
 		.payload = {
 			.substitute = {
 				"apollo.rip",
@@ -186,7 +187,7 @@ void grn_cat_transforms_orpheus( struct vector *vec, int *out_err ) {
 	ERR_FW();
 	vector_push( vec, list_subst, out_err );
 	ERR_FW();
-};
+}
 
 struct grn_transform *grn_new_announce_substitution_transform( const char *find, const char *replace ) {
 	struct grn_transform to_return[] = {
@@ -307,7 +308,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 			filtered = ben_dict_get_by_str( filtered, filter_key );
 		}
 		// TODO: proper error handling when the key is not in the bencode. Also, don't just fail on bencode error above either, handle it somehow
-		if (filtered == NULL) {
+		if ( filtered == NULL ) {
 			continue;
 		}
 
@@ -351,7 +352,7 @@ static void freopen_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	// it will get fclosed by the caller with grn_ctx_free
 	ctx->fh = freopen( NULL, "w", ctx->fh );
-	ERR(ctx->fh == NULL, GRN_ERR_FS);
+	ERR( ctx->fh == NULL, GRN_ERR_FS );
 }
 
 static void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
@@ -484,7 +485,7 @@ static int cat_nftw_cb( const char *path, const struct stat *st, int file_type, 
 
 	// the path might not be dynamic (it might actually change between callback runs, if nftw uses readdir internally?)
 	char *path_cp = malloc( strlen( path ) + 1 );
-	if ( !path_cp ) {
+	if ( path_cp == NULL ) {
 		return GRN_ERR_OOM;
 	}
 	strcpy( path_cp, path );
@@ -506,3 +507,76 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
 	}
 }
 
+void grn_cat_client( struct vector *vec, int client, int *out_err ) {
+	*out_err = GRN_OK;
+
+	char *state_path = NULL, *home_path, *full_path;
+	bool use_home = true;
+
+	// TODO: does this work in Windows? Should we get appdata instead?
+	home_path = getenv( "HOME" );
+	ERR( home_path == NULL, GRN_ERR_NO_CLIENT_PATH );
+
+	switch ( client ) {
+		case GRN_CLIENT_QBITTORENT:
+			;
+#if defined __unix__
+			state_path = "/.local/share/data/qBittorrent/BT_backup";
+#elif defined __APPLE__
+			state_path = "/Library/Application Suppport/qBittorrent/BT_backup";
+#elif defined _WIN32
+			state_path = "/AppData/Local/qBittorrent/BT_backup";
+#endif
+			break;
+		case GRN_CLIENT_DELUGE:
+			;
+#if defined __unix__ || defined __APPLE__
+			state_path = "/.config/deluge/state";
+#elif defined _WIN32
+			state_path = "";
+#endif
+			break;
+		case GRN_CLIENT_TRANSMISSION:
+			;
+#if defined __unix__
+			state_path = "/.config/transmission/torrents";
+#elif defined __APPLE__
+			state_path = "/Library/Application Support/Transmission/torrents";
+#elif defined _WIN32
+			state_path = "/AppData/Local/transmission/torrents";
+#endif
+			break;
+		case GRN_CLIENT_TRANSMISSION_DAEMON:
+			;
+#if defined __unix__
+			state_path = "/.config/transmission-daemon/torrents";
+#elif defined __APPLE__
+			// TODO: check what the status is of transmission daemon on mac. Does it exist at all?
+			state_path = "/Library/Application Support/Transmission/torrents";
+#elif defined _WIN32
+			state_path = "/AppData/Local/transmission-daemon";
+#endif
+			break;
+		default:
+			*out_err = GRN_ERR_WRONG_CLIENT;
+			return;
+			break;
+	}
+
+	// unsupported OS (windows with rtorrent) or something esotoric that does not define our variables
+	ERR( state_path == NULL, GRN_ERR_NO_CLIENT_PATH );
+
+	if ( use_home ) {
+		full_path = malloc( strlen( home_path ) + strlen( state_path ) + 1 );
+		ERR( full_path == NULL, GRN_ERR_OOM );
+		strcpy( full_path, home_path );
+		strcat( full_path, state_path );
+	} else {
+		full_path = state_path;
+	}
+
+	ERR( access( full_path, R_OK | X_OK ), GRN_ERR_READ_CLIENT_PATH );
+	grn_cat_torrent_files( vec, full_path, NULL, out_err);
+	// TODO: better errors for catting
+	ERR_FW();
+}

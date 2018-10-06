@@ -8,8 +8,10 @@ enum {
 	GRN_ERR_WRONG_BENCODE_TYPE,
 	GRN_ERR_WRONG_TRANSFORM_OPERATION,
 	GRN_ERR_WRONG_CTX_STATE,
-	// represents BEN errors 1, 2, 4. Ben error 0 is GRN_OK, 3 is GRN_ERR_OOM
-	GRN_ERR_BENCODE_SYNTAX,
+	GRN_ERR_WRONG_CLIENT,
+	GRN_ERR_BENCODE_SYNTAX, // represents BEN errors 1, 2, 4. Ben error 0 is GRN_OK, 3 is GRN_ERR_OOM
+	GRN_ERR_NO_CLIENT_PATH, // unable to determine the path for a client
+	GRN_ERR_READ_CLIENT_PATH, // able to determine the path a client should have, but it did not exist
 };
 
 

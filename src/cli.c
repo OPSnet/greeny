@@ -5,6 +5,7 @@
 
 #include "libannouncebulk.h"
 #include "vector.h"
+#include "err.h"
 
 char version_text[] = "GREENY, the Graphical, Really Easy Editor for torreNts, Yup!\n"
                       "You are using the GREENY command line interface, version PRE_ALPHA\n"
@@ -31,10 +32,17 @@ char help_text[] = "USAGE:\n"
 int main( int argc, char **argv ) {
 	int in_err;
 
-	bool qbittorrent;
+	// basically bools, but getopt_long wants an int
+	int qbittorrent = false;
 
 	char shortopts[] = "t:hv";
 	struct option longopts[] = {
+		{
+			.name = "qbittorrent",
+			.has_arg = 0,
+			.flag = &qbittorrent,
+			.val = true,
+		},
 		{ 0 },
 	};
 
@@ -77,17 +85,31 @@ int main( int argc, char **argv ) {
 		}
 	}
 
+	// add client-specific files
+	if ( qbittorrent ) {
+		grn_cat_client( files, GRN_CLIENT_QBITTORENT, &in_err );
+		if ( in_err ) {
+			puts( "Error with qBittorrent." );
+			goto cleanup_err;
+		}
+	}
+
 	// add normal files
 	for ( ; optind < argc; optind++ ) {
 		printf( "Adding %s and subdirectories.\n", argv[optind] );
 		grn_cat_torrent_files( files, argv[optind], NULL, &in_err );
-		if ( in_err ) goto cleanup_err;
+		if ( in_err == GRN_ERR_FS ) {
+			printf( "Error adding %s -- file may not exist.", argv[optind] );
+		}
+		if ( in_err ) {
+			goto cleanup_err;
+		}
 	}
 
 	int files_n = vector_length( files );
 	if ( files_n == 0 ) {
 		puts( "No files to transform." );
-		return 0;
+		goto cleanup_ok;
 	}
 	printf( "About to process %d files.\n", files_n );
 
@@ -100,7 +122,7 @@ int main( int argc, char **argv ) {
 
 	grn_ctx_set_files_v( ctx, files );
 	grn_ctx_set_transforms_v( ctx, transforms, &in_err );
-	if (in_err) {
+	if ( in_err ) {
 		puts( "Error setting transforms." );
 		goto cleanup_err;
 	}
@@ -117,7 +139,7 @@ int main( int argc, char **argv ) {
 	}
 
 	puts( "Transformations complete without error. Thank greeny." );
-	return 0;
+	goto cleanup_ok;
 
 cleanup_err:
 	puts( grn_err_to_string( in_err ) );
@@ -127,9 +149,8 @@ cleanup_err:
 	return 1;
 
 cleanup_ok:
-	vector_free( files );
 	vector_free_all( files );
 	vector_free_all( transforms );
 	grn_ctx_free( ctx, &in_err );
 	return 0;
-};
+}
