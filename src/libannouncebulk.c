@@ -102,7 +102,11 @@ char *grn_err_to_string( int err ) {
 		"Filesystem error.",
 		"Wrong bencode type (eg, int where string expected).",
 		"Wrong transform operation (unknown).",
-		"Invalid bencode syntax.",
+		"Context was in an unexpected state.",
+		"An unknown bittorrent client was specified.",
+		"Bencode syntax error.",
+		"Could not determine the path for the given bittorrent client.",
+		"Could not access the path for the given bittorrent client.",
 	};
 	return err_strings[err];
 }
@@ -223,7 +227,7 @@ char *strsubst( const char *haystack, const char *find, const char *replace, int
 	// not contained
 	if ( needle_start == NULL ) {
 		to_return = malloc( strlen( haystack ) + 1 );
-		ERR_NULL( !to_return, GRN_ERR_OOM );
+		ERR_NULL( to_return == NULL, GRN_ERR_OOM );
 		strcpy( to_return, haystack );
 		RETURN_OK( to_return );
 	}
@@ -231,7 +235,7 @@ char *strsubst( const char *haystack, const char *find, const char *replace, int
 
 	// simpler than MAX
 	to_return = malloc( haystack_n + find_n + replace_n + 1 );
-	ERR_NULL( !to_return, GRN_ERR_OOM );
+	ERR_NULL( to_return == NULL, GRN_ERR_OOM );
 	to_return[0] = '\0';
 	strncat( to_return, haystack, prefix_n );
 
@@ -240,7 +244,7 @@ char *strsubst( const char *haystack, const char *find, const char *replace, int
 	strcat( to_return, replace );
 
 	// copy suffix
-	strcat( to_return, haystack + prefix_n + replace_n );
+	strcat( to_return, haystack + prefix_n + find_n );
 
 	RETURN_OK( to_return );
 }
@@ -518,7 +522,7 @@ void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 	ERR( home_path == NULL, GRN_ERR_NO_CLIENT_PATH );
 
 	switch ( client ) {
-		case GRN_CLIENT_QBITTORENT:
+		case GRN_CLIENT_QBITTORRENT:
 			;
 #if defined __unix__
 			state_path = "/.local/share/data/qBittorrent/BT_backup";
@@ -576,7 +580,7 @@ void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 	}
 
 	ERR( access( full_path, R_OK | X_OK ), GRN_ERR_READ_CLIENT_PATH );
-	grn_cat_torrent_files( vec, full_path, NULL, out_err);
+	grn_cat_torrent_files( vec, full_path, NULL, out_err );
 	// TODO: better errors for catting
 	ERR_FW();
 }

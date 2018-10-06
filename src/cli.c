@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
@@ -23,26 +25,37 @@ char help_text[] = "USAGE:\n"
                    "\n"
                    "  --orpheus        Use the preset to transform for Orpheus. This is the default.\n"
                    "\n"
-                   "  --qbittorrent    Transform qbittorrent files in-place.\n"
-                   "  --qbit           ditto.\n"
-                   "  --deluge         Ditto for deluge.\n"
-                   "  --transmission   Ditto for transmission.\n"
-                   "  --rtorrent       Ditto for rtorrent.\n";
+                   "CLIENTS:"
+                   "Pass these arguments to modify the files for a certain BitTorrent client. You may need to restart it after running GREENY.\n"
+#define X_CLIENT(x_machine, x_enum, x_human) "  --" #x_machine ": " x_human "\n"
+#include "x_clients.h"
+#undef X_CLIENT
+                   "";
 
 int main( int argc, char **argv ) {
 	int in_err;
 
 	// basically bools, but getopt_long wants an int
-	int qbittorrent = false;
+#define X_CLIENT(x_machine, x_enum, x_human) int x_machine = 0;
+#include "x_clients.h"
+#undef X_CLIENT
 
 	char shortopts[] = "t:hv";
 	struct option longopts[] = {
 		{
-			.name = "qbittorrent",
+			.name = "help",
 			.has_arg = 0,
-			.flag = &qbittorrent,
-			.val = true,
+			.flag = NULL,
+			.val = 'h',
 		},
+#define X_CLIENT(x_machine, x_enum, x_human) { \
+	.name = #x_machine, \
+	.has_arg = 0, \
+	.flag = &x_machine, \
+	.val = 1, \
+},
+#include "x_clients.h"
+#undef X_CLIENT
 		{ 0 },
 	};
 
@@ -60,7 +73,7 @@ int main( int argc, char **argv ) {
 	if ( in_err ) goto cleanup_err;
 
 	int opt_c = 0;
-	while ( ( opt_c = getopt_long( argc, argv, shortopts, longopts, NULL ) != -1 ) ) {
+	while ( ( opt_c = getopt_long( argc, argv, shortopts, longopts, NULL ) ) != -1 ) {
 		switch ( ( char )opt_c ) {
 			// unknown option
 			case '?':
@@ -86,13 +99,15 @@ int main( int argc, char **argv ) {
 	}
 
 	// add client-specific files
-	if ( qbittorrent ) {
-		grn_cat_client( files, GRN_CLIENT_QBITTORENT, &in_err );
-		if ( in_err ) {
-			puts( "Error with qBittorrent." );
-			goto cleanup_err;
-		}
-	}
+#define X_CLIENT(x_machine, x_enum, x_human) if ( x_machine ) { \
+	grn_cat_client( files, x_enum, &in_err); \
+	if ( in_err ) { \
+		puts( "Error adding files for " x_human "." ); \
+		goto cleanup_err; \
+	} \
+}
+#include "x_clients.h"
+#undef X_CLIENT
 
 	// add normal files
 	for ( ; optind < argc; optind++ ) {
