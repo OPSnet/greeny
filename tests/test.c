@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -104,7 +105,7 @@ void _assert_transform_buffer_single( const char *buffer, struct grn_transform t
 	strcpy( my_ctx.buffer, buffer );
 	transform_buffer( &my_ctx, &in_err );
 	ASSERT_OK();
-	assert_memory_equal( my_ctx.buffer, expected_buffer, my_ctx.buffer_n );
+	assert_memory_equal( my_ctx.buffer, expected_buffer, my_ctx.buffer_n);
 	free( my_ctx.buffer );
 }
 
@@ -118,12 +119,15 @@ static void test_transform_buffer( void **state ) {
 	char *key_presto[2];
 	key_presto[0] = "presto";
 	key_presto[1] = NULL;
-	struct grn_transform transform_set_presto = GRN_MKTRANSFORM_SET_STRING( "presto", "largo" );
+	struct grn_transform transform_set_presto = grn_mktransform_set_string( "presto", "largo" );
 	transform_set_presto.key = key_dummy;
-	struct grn_transform transform_del_presto = GRN_MKTRANSFORM_DELETE( "presto" );
+	struct grn_transform transform_del_presto = grn_mktransform_delete( "presto" );
 	transform_del_presto.key = key_dummy;
-	struct grn_transform transform_sub_presto = GRN_MKTRANSFORM_SUBSTITUTE( "rgo", "pd" );
+	struct grn_transform transform_sub_presto = grn_mktransform_substitute( "rgo", "pd" );
 	transform_sub_presto.key = key_dummy;
+	struct grn_transform transform_regex_presto = grn_mktransform_substitute_regex( "m.{3}", "mm", &in_err );
+	assert_int_equal( in_err, GRN_OK );
+	transform_regex_presto.key = key_dummy;
 
 	struct grn_transform transform_del_inner_presto = transform_del_presto;
 	transform_del_inner_presto.key = key_presto;
@@ -133,6 +137,7 @@ static void test_transform_buffer( void **state ) {
 	_assert_transform_buffer_single( "d6:presto5:largoe", transform_del_presto, "de" );
 	_assert_transform_buffer_single( "5:largo", transform_sub_presto, "4:lapd" );
 	_assert_transform_buffer_single( "l5:largo10:overgottene", transform_sub_presto, "l4:lapd9:ovepdttene" );
+	_assert_transform_buffer_single( "10:imeltunity", transform_regex_presto, "8:immunity" );
 
 	// test no-ops
 	_assert_transform_buffer_single( "de", transform_del_presto, "de" );
@@ -152,13 +157,101 @@ static void test_transform_buffer( void **state ) {
 	// TODO: test deep substitute in lists
 }
 
+bool is_string_passphrase( const char * );
+
+static void test_is_string_passphrase( void **state ) {
+	( void ) state;
+	assert_int_equal( is_string_passphrase( "hello" ), 0 );
+	assert_int_equal( is_string_passphrase( "12345" ), 0 );
+	assert_int_equal( is_string_passphrase( "abcdef1234567890abcdef1234567890" ), 1 );
+	assert_int_equal( is_string_passphrase( "12345678298237846839050296378940" ), 1 );
+	assert_int_equal( is_string_passphrase( "abcedecbacdcbeccadecbbeccadcecbc" ), 1 );
+	assert_int_equal( is_string_passphrase( "abcdef123456789012345678901234567777" ), 2 );
+}
+
+char *normalize_announce_url( char *user_announce, char *our_announce );
+int OPS_URL_LENGTH;
+
+static void test_normalize_orpheus_announce( void **state ) {
+	( void ) state;
+	char our_announce[OPS_URL_LENGTH + 1];
+
+	assert_int_equal( normalize_announce_url( "meow", our_announce ), false );
+	assert_int_equal( normalize_announce_url( "https://opsfet.ch/helloworld123testing/announce", our_announce ), false );
+	assert_int_equal( normalize_announce_url( "https://mars.apollo.rip/abcdef1234567890abcdef123456789/announce", our_announce ), false );
+	assert_int_equal( normalize_announce_url( "https://opsfet.ch/abcdef1234567890abcdef123456789", our_announce ), false );
+
+	assert_int_equal(
+	    normalize_announce_url( "https://opsfet.ch/abcdef1234567890abcdef1234567890/announce", our_announce ),
+	    true
+	);
+	assert_string_equal( our_announce, "https://opsfet.ch/abcdef1234567890abcdef1234567890/announce" );
+
+	assert_int_equal(
+	    normalize_announce_url( "abcdef1234567890abcdef1234567890", our_announce ),
+	    true
+	);
+	assert_string_equal( our_announce, "https://opsfet.ch/abcdef1234567890abcdef1234567890/announce" );
+}
+
+#define RECAT_ORPHEUS_TRANSFORMS(ann) my_vec = vector_alloc(&in_err); \
+assert_int_equal(in_err, GRN_OK); \
+grn_cat_transforms_orpheus(my_vec, ann, &in_err);
+
+static void test_cat_orpheus_transforms( void **state ) {
+	( void ) state;
+	int in_err;
+	struct vector *my_vec;
+
+	RECAT_ORPHEUS_TRANSFORMS( NULL );
+	assert_int_equal( in_err, GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
+	RECAT_ORPHEUS_TRANSFORMS( "" );
+	assert_int_equal( in_err, GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
+
+	RECAT_ORPHEUS_TRANSFORMS( "https://flacsfor.me/abcdef0123456789abcdef0123456789/announce" );
+	assert_int_equal( in_err, GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
+	vector_free_all( my_vec );
+
+	RECAT_ORPHEUS_TRANSFORMS( "abcdef0123456789abcdef0123456789" );
+	ASSERT_OK();
+	_assert_transform_buffer_single(
+	    "d8:announce65:https://mars.apollo.rip/abcdef0123456789abcdef0123456789/announcee",
+	    *( ( struct grn_transform * ) my_vec->buffer[0] ),
+	    "d8:announce59:https://opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
+	);
+	vector_free_all( my_vec );
+
+	RECAT_ORPHEUS_TRANSFORMS( "abcdef0123456789abcdef0123456789" );
+	ASSERT_OK();
+	_assert_transform_buffer_single(
+	    "d8:announce60:https://xanax.rip/abcdef0123456789abcdef0123456789/announce/e",
+	    *( ( struct grn_transform * ) my_vec->buffer[0] ),
+	    "d8:announce59:https://opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
+	);
+	vector_free_all( my_vec );
+
+	RECAT_ORPHEUS_TRANSFORMS( "abcdef0123456789abcdef0123456789" );
+	ASSERT_OK();
+	_assert_transform_buffer_single(
+	    "d8:announce65:https://maps.apollo.rip/abcdef0123456789abcdef0123456789/announcee",
+	    *( ( struct grn_transform * ) my_vec->buffer[0] ),
+	    "d8:announce65:https://maps.apollo.rip/abcdef0123456789abcdef0123456789/announcee"
+	);
+	vector_free_all( my_vec );
+}
+
 int main( void ) {
 	const struct CMUnitTest tests[] = {
 		cmocka_unit_test( test_sanity ),
 		cmocka_unit_test( test_vector ),
 		cmocka_unit_test( test_strsubst ),
 		cmocka_unit_test( test_transform_buffer ),
+		cmocka_unit_test( test_is_string_passphrase ),
+		cmocka_unit_test( test_normalize_orpheus_announce ),
+		cmocka_unit_test( test_cat_orpheus_transforms ),
 	};
 
 	return cmocka_run_group_tests( tests, NULL, NULL );
 }
+
+

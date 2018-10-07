@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <ftw.h>
+#include <ctype.h>
+#include <regex.h>
+
 #include <bencode.h>
 
 #include "libannouncebulk.h"
@@ -109,6 +112,7 @@ char *grn_err_to_string( int err ) {
 		"Bencode syntax error.",
 		"Could not determine the path for the given bittorrent client.",
 		"Could not access the path for the given bittorrent client.",
+		"Invalid regular expression.",
 	};
 	return err_strings[err];
 }
@@ -124,6 +128,11 @@ int bencode_error_to_anb( int bencode_error ) {
 
 // BEGIN preset and semi-presets
 
+// some constants first
+const char OPS_PASSPHRASE_PREFIX[] = "https://opsfet.ch/";
+const char OPS_PASSPHRASE_SUFFIX[] = "/announce";
+const int OPS_PASSPHRASE_LENGTH = 32;
+const int OPS_URL_LENGTH = 59;
 
 char *announce_str_key[] = {
 	"announce",
@@ -134,46 +143,181 @@ char *announce_list_key[] = {
 	NULL,
 };
 
-void grn_cat_transforms_orpheus( struct vector *vec, int *out_err ) {
+enum {
+	GRN_PASSPHRASE_NOT = 0,
+	GRN_PASSPHRASE_EXACT,
+	GRN_PASSPHRASE_STARTS,
+};
+
+int is_string_passphrase( const char *str ) {
+	return strspn( str, "0123456789abcdef" ) >= OPS_PASSPHRASE_LENGTH ?
+	       strlen( str ) == OPS_PASSPHRASE_LENGTH ? GRN_PASSPHRASE_EXACT : GRN_PASSPHRASE_STARTS
+	       : GRN_PASSPHRASE_NOT;
+}
+
+// Not thread safe, but neither am I!
+/**
+* @brief Converts either an OPS announce URL or an OPS passphrase into a URL, or errors out
+*
+* @param user_announce The input from the user
+* @param our_announce A string of size OPS_URL_LENGTH plus null byte
+* @return whether we were able to normalize or not. If false, bad user input.
+*/
+bool normalize_announce_url( char *user_announce, char *our_announce ) {
+
+	if ( user_announce == NULL ) {
+		return false;
+	}
+
+	if ( is_string_passphrase( user_announce ) == GRN_PASSPHRASE_EXACT ) {
+		strcpy( our_announce, OPS_PASSPHRASE_PREFIX );
+		strcat( our_announce, user_announce );
+		strcat( our_announce, OPS_PASSPHRASE_SUFFIX );
+		return true;
+	}
+
+	if (
+	    // https://opsfet.ch/
+	    strncmp( user_announce, OPS_PASSPHRASE_PREFIX, strlen( OPS_PASSPHRASE_PREFIX ) ) == 0 &&
+	    // passphrase
+	    is_string_passphrase( user_announce + strlen( OPS_PASSPHRASE_PREFIX ) ) == GRN_PASSPHRASE_STARTS &&
+	    // /announce
+	    strcmp( user_announce + strlen( OPS_PASSPHRASE_PREFIX ) + OPS_PASSPHRASE_LENGTH, OPS_PASSPHRASE_SUFFIX ) == 0
+	) {
+		strcpy( our_announce, user_announce );
+		return true;
+	}
+
+	return false;
+}
+
+// generic orpheus transform, i.e, user did not provide a passphrase
+void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *out_err ) {
 	*out_err = GRN_OK;
+
+	char *normalized_url = malloc(OPS_URL_LENGTH);
+	ERR(normalized_url == NULL, GRN_ERR_OOM);
+
+	ERR( !normalize_announce_url( user_announce, normalized_url ), GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
+	GRN_LOG_DEBUG("Normalized announce URL: %s", normalized_url);
 
 	// there's no fucking way this should be dynamically allocated, but it is.
 	struct grn_transform *key_subst = malloc( sizeof( struct grn_transform ) );
 	ERR( key_subst == NULL, GRN_ERR_OOM );
-	*key_subst = ( struct grn_transform ) {
-		.key = announce_str_key,
-		 .operation = GRN_TRANSFORM_SUBSTITUTE,
-		.payload = {
-			.substitute = {
-				"apollo.rip",
-				"orpheus.network",
-			}
-		}
-	};
 	struct grn_transform *list_subst = malloc( sizeof( struct grn_transform ) );
 	ERR( list_subst == NULL, GRN_ERR_OOM );
-	*list_subst = ( struct grn_transform ) {
-		.key = announce_list_key,
-		 .operation = GRN_TRANSFORM_SUBSTITUTE,
-		.payload = {
-			.substitute = {
-				"apollo.rip",
-				"orpheus.network",
-			}
-		}
-	};
+
+	*key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
+	ERR_FW();
+	*list_subst = *key_subst;
+
+	key_subst->key = announce_str_key;
+	list_subst->key = announce_list_key;
+
 	vector_push( vec, key_subst, out_err );
 	ERR_FW();
 	vector_push( vec, list_subst, out_err );
 	ERR_FW();
 }
 
+struct grn_transform grn_mktransform_set_string( char *key, char *val ) {
+	return ( struct grn_transform ) {
+		.operation = GRN_TRANSFORM_SET_STRING,
+		.payload = {
+			.set_string = {
+				.key = key,
+				.val = val,
+			},
+		},
+	};
+}
+
+struct grn_transform grn_mktransform_delete( char *key ) {
+	return ( struct grn_transform ) {
+		.operation = GRN_TRANSFORM_DELETE,
+		.payload = {
+			.set_string = {
+				.key = key,
+			},
+		},
+	};
+}
+
+struct grn_transform grn_mktransform_substitute( char *find, char *replace ) {
+	return ( struct grn_transform ) {
+		.operation = GRN_TRANSFORM_SUBSTITUTE,
+		.payload = {
+			.substitute = {
+				.find = find,
+				.replace = replace,
+			},
+		},
+	};
+}
+
+struct grn_transform grn_mktransform_substitute_regex( char *find_regstr, char *replace, int *out_err ) {
+	*out_err = GRN_OK;
+
+	struct grn_transform to_return = {
+		.operation = GRN_TRANSFORM_SUBSTITUTE_REGEX,
+		.payload = {
+			.substitute_regex = {
+				.replace = replace,
+			},
+		}
+	};
+
+	int regcomp_res = regcomp( &to_return.payload.substitute_regex.find, find_regstr, REG_EXTENDED );
+	if ( regcomp_res == REG_ESPACE ) {
+		*out_err = GRN_ERR_OOM;
+		return to_return;
+	}
+	if ( regcomp_res ) {
+		*out_err = GRN_ERR_REGEX_SYNTAX;
+		return to_return;
+	}
+
+	return to_return;
+}
+
+// END preset and semi-presets
+
+/**
+* @brief replaces in a string based on the index of the start and end of the needle
+*
+* @param haystack the string to replace inside of
+* @param replace the string to replace with
+* @param start_i The zero-indexed start of the found needle
+* @param end_i The zero-indexed end of the needl in haystack
+* @return the dynamically-allocated replaced haystack with replacements
+*/
+char *strsubst_by_indices( const char *haystack, const char *replace, int start_i, int find_n, int *out_err ) {
+	*out_err = GRN_OK;
+
+	assert( start_i >= 0 );
+	assert( find_n >= 0 );
+	const int haystack_n = strlen( haystack ),
+	          replace_n = strlen( replace );
+
+	char *to_return = malloc( haystack_n + replace_n + 1 );
+	ERR_NULL( to_return == NULL, GRN_ERR_OOM );
+	to_return[0] = '\0';
+	strncat( to_return, haystack, start_i );
+
+	// copy substitution
+	// intentionally ignore null byte on replace
+	strcat( to_return, replace );
+
+	// copy suffix
+	strcat( to_return, haystack + start_i + find_n );
+
+	return to_return;
+}
+
 // returns dynamically allocated
 char *strsubst( const char *haystack, const char *find, const char *replace, int *out_err ) {
+	*out_err = GRN_OK;
 	char *to_return;
-
-	// no need to be fast about it.
-	int haystack_n = strlen( haystack ), find_n = strlen( find ), replace_n = strlen( replace );
 
 	char *needle_start = strstr( haystack, find );
 	// not contained
@@ -183,22 +327,27 @@ char *strsubst( const char *haystack, const char *find, const char *replace, int
 		strcpy( to_return, haystack );
 		RETURN_OK( to_return );
 	}
-	int prefix_n = haystack_n - strlen( needle_start );
+	to_return = strsubst_by_indices( haystack, replace, needle_start - haystack, strlen( find ), out_err );
+	ERR_FW_NULL();
+	return to_return;
+}
 
-	// simpler than MAX
-	to_return = malloc( haystack_n + find_n + replace_n + 1 );
-	ERR_NULL( to_return == NULL, GRN_ERR_OOM );
-	to_return[0] = '\0';
-	strncat( to_return, haystack, prefix_n );
+char *regsubst( const char *haystack, regex_t *find, const char *replace, int *out_err ) {
+	*out_err = GRN_OK;
+	regmatch_t match[1];
+	char *to_return;
 
-	// copy substitution
-	// intentionally ignore null byte on replace
-	strcat( to_return, replace );
-
-	// copy suffix
-	strcat( to_return, haystack + prefix_n + find_n );
-
-	RETURN_OK( to_return );
+	int regexec_res = regexec( find, haystack, 1, match, 0 );
+	// supposedly it can only fail in case of no match -- not OOM
+	if ( regexec_res ) {
+		to_return = malloc( strlen( haystack ) + 1 );
+		ERR_NULL( to_return == NULL, GRN_ERR_OOM );
+		strcpy( to_return, haystack );
+		return to_return;
+	}
+	to_return = strsubst_by_indices( haystack, replace, match->rm_so, match->rm_eo - match->rm_so, out_err );
+	ERR_FW_NULL();
+	return to_return;
 }
 
 /**
@@ -213,32 +362,42 @@ bool str_ends_with( const char *haystack, const char *needle ) {
 	return strcmp( haystack_suffix, needle ) == 0;
 }
 
-// this is not a mutator -- it is called by the mutators
-void ben_subst( struct bencode *haystack, const char *find, const char *replace, int *out_err ) {
-	*out_err = GRN_OK;
-	assert( haystack->type == BENCODE_STR );
-
-	char *substituted = strsubst( ben_str_val( haystack ), find, replace, out_err );
-	ERR_FW();
-
-	struct bencode_str *haystack_str = ( struct bencode_str * ) haystack;
-	// not ben_free, because ben_free will also free the bencode itself
-	// thankfully enough, I learned this the easy way: By looking at the source code.
-	free( haystack_str->s );
-	haystack_str->s = substituted;
-	haystack_str->len = strlen( substituted );
-	RETURN_OK();
+void ben_str_swap( struct bencode *ben, char *replace_with ) {
+	struct bencode_str *benstr = ( struct bencode_str * ) ben;
+	free( benstr->s );
+	benstr->s = replace_with;
+	benstr->len = strlen( replace_with );
 }
 
 // these two are mutators
 void mutate_string_subst( struct bencode *ben, void *state, int *out_err ) {
 	*out_err = GRN_OK;
+	assert( ben->type == BENCODE_STR );
 
 	struct grn_op_substitute *payload = ( struct grn_op_substitute * ) state;
-	ben_subst( ben, payload->find, payload->replace, out_err );
+	char *substituted = strsubst( ben_str_val( ben ), payload->find, payload->replace, out_err );
 	ERR_FW();
+	ben_str_swap( ben, substituted );
 }
 
+void mutate_string_subst_regex( struct bencode *ben, void *state, int *out_err ) {
+	*out_err = GRN_OK;
+	assert( ben->type == BENCODE_STR );
+
+	struct grn_op_substitute_regex *payload = ( struct grn_op_substitute_regex * ) state;
+	char *substituted = regsubst( ben_str_val( ben ), &payload->find, payload->replace, out_err );
+	ERR_FW();
+	ben_str_swap( ben, substituted );
+}
+
+/**
+* @brief Transforms a bencode by running a custom callback for each string, recursively
+*
+* @param ben The bencode to modify
+* @param mutator The custom callback
+* @param mutate_me A bencode string
+* @param state custom param
+*/
 void ben_forall_strings( struct bencode *ben, void ( *mutator )( struct bencode *mutate_me, void *state, int *out_err ), void *state, int *out_err ) {
 	*out_err = GRN_OK;
 
@@ -306,7 +465,12 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 				break;
 			case GRN_TRANSFORM_SUBSTITUTE:
 				;
-				ben_forall_strings( filtered, &mutate_string_subst, (void *) &transform.payload, out_err );
+				ben_forall_strings( filtered, &mutate_string_subst, ( void * ) &transform.payload, out_err );
+				ERR_FW();
+				break;
+			case GRN_TRANSFORM_SUBSTITUTE_REGEX:
+				;
+				ben_forall_strings( filtered, &mutate_string_subst_regex, ( void * ) &transform.payload, out_err );
 				ERR_FW();
 				break;
 			default:

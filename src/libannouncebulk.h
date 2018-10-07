@@ -3,6 +3,8 @@
 
 #include <stdio.h>
 #include <stdbool.h>
+#include <regex.h>
+
 #include "vector.h"
 
 int ben_error_to_anb( int bencode_error );
@@ -12,6 +14,7 @@ enum grn_operation {
 	GRN_TRANSFORM_DELETE,
 	GRN_TRANSFORM_SET_STRING,
 	GRN_TRANSFORM_SUBSTITUTE,
+	GRN_TRANSFORM_SUBSTITUTE_REGEX,
 };
 enum grn_operation grn_human_to_operation( char *human, int *out_err );
 
@@ -44,36 +47,20 @@ struct grn_transform {
 			char *find;
 			char *replace;
 		} substitute;
+
+		struct grn_op_substitute_regex {
+			// this is inline so we don't have to allocate memory for it and shit
+			regex_t find;
+			char *replace;
+		} substitute_regex;
 	} payload;
 };
 
-// aww yiss
-#define GRN_MKTRANSFORM_SET_STRING(argkey, argval) ( (struct grn_transform ) { \
-	.operation = GRN_TRANSFORM_SET_STRING, \
-	.payload = { \
-		.set_string = { \
-			.key = argkey, \
-			.val = argval, \
-		} \
-	} \
-} )
-#define GRN_MKTRANSFORM_DELETE(argkey) ( (struct grn_transform ) { \
-	.operation = GRN_TRANSFORM_DELETE, \
-	.payload = { \
-		.delete_ = { \
-			.key = argkey, \
-		} \
-	} \
-} )
-#define GRN_MKTRANSFORM_SUBSTITUTE(argfind, argreplace) ( (struct grn_transform ) { \
-	.operation = GRN_TRANSFORM_SUBSTITUTE, \
-	.payload = { \
-		.substitute = { \
-			.find = argfind, \
-			.replace = argreplace, \
-		} \
-	} \
-} )
+struct grn_transform grn_mktransform_set_string( char *key, char *val );
+struct grn_transform grn_mktransform_delete( char *key );
+struct grn_transform grn_mktransform_substitute( char *find, char *replace );
+// can fail because of regex compilation
+struct grn_transform grn_mktransform_substitute_regex( char *find_regstr, char *replace, int *out_err );
 
 struct grn_callback_arg {
 	// progress bar info
@@ -170,7 +157,7 @@ enum grn_torrent_client {
 
 /**
 * @brief Adds the files for a specific torrent client to the vector
-* 
+*
 * @param vec The vector to add the file paths to
 * @param client The enum value of the client (see x_clients.h)
 */
@@ -197,8 +184,9 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
  * Adds the orpheus default transforms to the list.
  * They will be dynamically allocated.
  * @param vec the list of transforms to append to
+ * @param user_announce the new announce thing. If it's null, passphrase will be kept; if it's just a passphrase, that will be handled, and if it's a full URL that is "gucci" as well. An error will be thrown if it is neither.
  */
-void grn_cat_transforms_orpheus( struct vector *vec, int *out_err );
+void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *out_err );
 
 // END
 
