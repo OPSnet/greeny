@@ -75,8 +75,6 @@ struct grn_transform {
 	} \
 } )
 
-void grn_transform_free( struct grn_transform *transform, int *out_err );
-
 struct grn_callback_arg {
 	// progress bar info
 	int numerator;
@@ -170,6 +168,12 @@ enum grn_torrent_client {
 	GRN_CLIENT_TRANSMISSION_DAEMON,
 };
 
+/**
+* @brief Adds the files for a specific torrent client to the vector
+* 
+* @param vec The vector to add the file paths to
+* @param client The enum value of the client (see x_clients.h)
+*/
 void grn_cat_client( struct vector *vec, int client, int *out_err );
 
 // END client-specific

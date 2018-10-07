@@ -23,6 +23,7 @@
 
 void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
+	assert( ctx->state == GRN_CTX_READ );
 
 	// we can't just do fread(buffer, 1, some_massive_num, fh) because we can't be sure whether
 	// the whole file was read or not.
@@ -40,6 +41,7 @@ void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
 
 void fwrite_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
+	assert( ctx->state == GRN_CTX_WRITE );
 
 	ERR( fwrite( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1, GRN_ERR_FS );
 }
@@ -118,34 +120,6 @@ int bencode_error_to_anb( int bencode_error ) {
 	return GRN_ERR_BENCODE_SYNTAX;
 }
 
-// assumes that all keys and payload strings were dynamically allocated.
-void grn_transform_free( struct grn_transform *transform, int *out_err ) {
-	// free all keys
-	char *key_cur;
-	int i = 0;
-	while ( ( key_cur = transform->key[i++] ) ) {
-		free( key_cur );
-	}
-	free( transform->key );
-	// free payload
-	switch ( transform->operation ) {
-		case GRN_TRANSFORM_DELETE:
-			free( transform->payload.delete_.key );
-			break;
-		case GRN_TRANSFORM_SET_STRING:
-			free( transform->payload.set_string.key );
-			free( transform->payload.set_string.val );
-			break;
-		case GRN_TRANSFORM_SUBSTITUTE:
-			free( transform->payload.substitute.find );
-			free( transform->payload.substitute.replace );
-			break;
-		default:
-			ERR( GRN_ERR_WRONG_TRANSFORM_OPERATION );
-			break;
-	}
-}
-
 // END custom data type operations
 
 // BEGIN preset and semi-presets
@@ -159,6 +133,7 @@ char *announce_list_key[] = {
 	"announce-list",
 	NULL,
 };
+
 void grn_cat_transforms_orpheus( struct vector *vec, int *out_err ) {
 	*out_err = GRN_OK;
 
@@ -193,29 +168,6 @@ void grn_cat_transforms_orpheus( struct vector *vec, int *out_err ) {
 	ERR_FW();
 }
 
-struct grn_transform *grn_new_announce_substitution_transform( const char *find, const char *replace ) {
-	struct grn_transform to_return[] = {
-		{
-			announce_str_key,
-			GRN_TRANSFORM_SUBSTITUTE,
-			{ {
-					find,
-					replace,
-				}
-			},
-		},
-		{
-			announce_list_key,
-			GRN_TRANSFORM_SUBSTITUTE,
-			find,
-			replace,
-		},
-	};
-	return to_return;
-}
-
-// END preset and semi-presets
-
 // returns dynamically allocated
 char *strsubst( const char *haystack, const char *find, const char *replace, int *out_err ) {
 	char *to_return;
@@ -249,18 +201,6 @@ char *strsubst( const char *haystack, const char *find, const char *replace, int
 	RETURN_OK( to_return );
 }
 
-// modifies in place
-void ben_str_subst( struct bencode *haystack, char *find, char *replace, int *out_err ) {
-	assert( haystack->type == BENCODE_STR );
-	char *substituted = strsubst( ben_str_val( haystack ), find, replace, out_err );
-	ERR_FW();
-
-	struct bencode_str *haystack_str = ( struct bencode_str * )haystack;
-	haystack_str->s = substituted;
-	haystack_str->len = strlen( substituted );
-	RETURN_OK();
-}
-
 /**
  * @param haystack the string that should end with needle
  * @param needle the string haystack should end with
@@ -273,27 +213,52 @@ bool str_ends_with( const char *haystack, const char *needle ) {
 	return strcmp( haystack_suffix, needle ) == 0;
 }
 
-// this will have undefined behavior if there are null bytes in the string
-// let's be honest though, it will just truncate it after the first null byte
-void ben_substitute( struct bencode *ben, char *find, char *replace, int *out_err ) {
+// this is not a mutator -- it is called by the mutators
+void ben_subst( struct bencode *haystack, const char *find, const char *replace, int *out_err ) {
+	*out_err = GRN_OK;
+	assert( haystack->type == BENCODE_STR );
+
+	char *substituted = strsubst( ben_str_val( haystack ), find, replace, out_err );
+	ERR_FW();
+
+	struct bencode_str *haystack_str = ( struct bencode_str * ) haystack;
+	// not ben_free, because ben_free will also free the bencode itself
+	// thankfully enough, I learned this the easy way: By looking at the source code.
+	free( haystack_str->s );
+	haystack_str->s = substituted;
+	haystack_str->len = strlen( substituted );
+	RETURN_OK();
+}
+
+// these two are mutators
+void mutate_string_subst( struct bencode *ben, void *state, int *out_err ) {
+	*out_err = GRN_OK;
+
+	struct grn_op_substitute *payload = ( struct grn_op_substitute * ) state;
+	ben_subst( ben, payload->find, payload->replace, out_err );
+	ERR_FW();
+}
+
+void ben_forall_strings( struct bencode *ben, void ( *mutator )( struct bencode *mutate_me, void *state, int *out_err ), void *state, int *out_err ) {
+	*out_err = GRN_OK;
+
 	if ( ben->type == BENCODE_STR ) {
-		ben_str_subst( ben, find, replace, out_err );
+		mutator( ben, state, out_err );
 		ERR_FW();
 	} else if ( ben->type == BENCODE_LIST ) {
-		size_t list_n = ben_list_len( ben );
+		int list_n = ben_list_len( ben );
 		for ( int i = 0; i < list_n; i++ ) {
 			struct bencode *list_cur = ben_list_get( ben, i );
-			// recursive bitches
-			ben_substitute( list_cur, find, replace, out_err );
+			ben_forall_strings( list_cur, mutator, state, out_err );
 			ERR_FW();
 		}
 	}
-	// if it's not either a string or list, just ignore it.
-	RETURN_OK();
 }
 
 void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
+
+	assert( ctx->state == GRN_CTX_TRANSFORM );
 
 	int bencode_error;
 	size_t off = 0;
@@ -341,8 +306,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 				break;
 			case GRN_TRANSFORM_SUBSTITUTE:
 				;
-				struct grn_op_substitute subst_payload = transform.payload.substitute;
-				ben_substitute( filtered, subst_payload.find, subst_payload.replace, out_err );
+				ben_forall_strings( filtered, &mutate_string_subst, (void *) &transform.payload, out_err );
 				ERR_FW();
 				break;
 			default:

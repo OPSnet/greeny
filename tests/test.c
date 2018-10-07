@@ -95,6 +95,7 @@ void _assert_transform_buffer_single( const char *buffer, struct grn_transform t
 	int in_err;
 
 	struct grn_ctx my_ctx = {
+		.state = GRN_CTX_TRANSFORM,
 		.buffer = malloc( 256 ),
 		.buffer_n = strlen( buffer ), // they don't need to know about that silly null byte
 		.transforms = &transform,
