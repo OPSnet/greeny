@@ -9,7 +9,7 @@ binary_cli     := ./greeny-cli
 LIBS_cli       := 
 
 headers_test   := $(headers_common)
-sources_test   := $(sources_common) tests/test.c
+sources_test   := $(sources_common) tests/test.o
 binary_test    := ./test-greeny
 LIBS_test      := -lcmocka
 

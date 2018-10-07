@@ -1856,6 +1856,8 @@ static void dict_unlink(struct bencode_dict *d, size_t bucket, size_t unlinkpos)
 static struct bencode *dict_pop(struct bencode_dict *d, 
 				const struct bencode *key, long long hash)
 {
+	if (d->n == 0)
+		return NULL;
 	struct bencode *value;
 	size_t removebucket = hash_bucket(hash, d);
 	size_t tailpos = d->n - 1;

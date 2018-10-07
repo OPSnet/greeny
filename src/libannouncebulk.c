@@ -249,8 +249,9 @@ char *strsubst( const char *haystack, const char *find, const char *replace, int
 	RETURN_OK( to_return );
 }
 
+// modifies in place
 void ben_str_subst( struct bencode *haystack, char *find, char *replace, int *out_err ) {
-	ERR( haystack->type != BENCODE_STR, GRN_ERR_WRONG_BENCODE_TYPE );
+	assert( haystack->type == BENCODE_STR );
 	char *substituted = strsubst( ben_str_val( haystack ), find, replace, out_err );
 	ERR_FW();
 
@@ -282,13 +283,12 @@ void ben_substitute( struct bencode *ben, char *find, char *replace, int *out_er
 		size_t list_n = ben_list_len( ben );
 		for ( int i = 0; i < list_n; i++ ) {
 			struct bencode *list_cur = ben_list_get( ben, i );
-			ERR( list_cur->type != BENCODE_STR, GRN_ERR_WRONG_BENCODE_TYPE );
-			ben_str_subst( list_cur, find, replace, out_err );
+			// recursive bitches
+			ben_substitute( list_cur, find, replace, out_err );
 			ERR_FW();
 		}
-	} else {
-		ERR( GRN_ERR_WRONG_BENCODE_TYPE );
 	}
+	// if it's not either a string or list, just ignore it.
 	RETURN_OK();
 }
 
@@ -305,13 +305,15 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 
 		// first, filter down by the keys in the transform
 		struct bencode *filtered = main_dict;
+		assert( transform.key != NULL );
 		char *filter_key;
 		int k = 0;
 		while ( ( filter_key = transform.key[k++] ) != NULL ) {
-			ERR( filtered->type != BENCODE_DICT, GRN_ERR_WRONG_BENCODE_TYPE );
+			if ( filtered == NULL || filtered->type != BENCODE_DICT ) {
+				break;
+			}
 			filtered = ben_dict_get_by_str( filtered, filter_key );
 		}
-		// TODO: proper error handling when the key is not in the bencode. Also, don't just fail on bencode error above either, handle it somehow
 		if ( filtered == NULL ) {
 			continue;
 		}
@@ -321,11 +323,19 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 				;
 				// it returns a "standalone" pointer to the value, that must be freed. It modifies
 				// the main_dict in place
-				ben_free( ben_dict_pop_by_str( filtered, transform.payload.delete_.key ) );
+				if ( filtered->type != BENCODE_DICT ) {
+					break;
+				}
+				struct bencode *popped_val = ben_dict_pop_by_str( filtered, transform.payload.delete_.key );
+				if ( popped_val != NULL ) {
+					ben_free( popped_val );
+				}
 				break;
 			case GRN_TRANSFORM_SET_STRING:
 				;
-				// TODO: maybe support setting an array?
+				if ( filtered->type != BENCODE_DICT ) {
+					break;
+				}
 				struct grn_op_set_string setstr_payload = transform.payload.set_string;
 				ERR( ben_dict_set_str_by_str( filtered, setstr_payload.key, setstr_payload.val ), GRN_ERR_OOM );
 				break;
@@ -342,11 +352,13 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 		}
 	}
 
-	// TODO: consider checking whether the file was actually modified to do this lazily?
 	free( ctx->buffer );
 	ctx->buffer = ben_encode( &ctx->buffer_n, main_dict );
-	ERR( !ctx->buffer, GRN_ERR_OOM );
+	ERR( ctx->buffer == NULL, GRN_ERR_OOM );
+	goto cleanup;
+cleanup:
 	ben_free( main_dict );
+	return;
 }
 
 /**

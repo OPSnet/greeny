@@ -47,6 +47,34 @@ struct grn_transform {
 	} payload;
 };
 
+// aww yiss
+#define GRN_MKTRANSFORM_SET_STRING(argkey, argval) ( (struct grn_transform ) { \
+	.operation = GRN_TRANSFORM_SET_STRING, \
+	.payload = { \
+		.set_string = { \
+			.key = argkey, \
+			.val = argval, \
+		} \
+	} \
+} )
+#define GRN_MKTRANSFORM_DELETE(argkey) ( (struct grn_transform ) { \
+	.operation = GRN_TRANSFORM_DELETE, \
+	.payload = { \
+		.delete_ = { \
+			.key = argkey, \
+		} \
+	} \
+} )
+#define GRN_MKTRANSFORM_SUBSTITUTE(argfind, argreplace) ( (struct grn_transform ) { \
+	.operation = GRN_TRANSFORM_SUBSTITUTE, \
+	.payload = { \
+		.substitute = { \
+			.find = argfind, \
+			.replace = argreplace, \
+		} \
+	} \
+} )
+
 void grn_transform_free( struct grn_transform *transform, int *out_err );
 
 struct grn_callback_arg {
