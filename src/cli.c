@@ -34,6 +34,7 @@ char help_text[] = "USAGE:\n"
 
 int main( int argc, char **argv ) {
 	int in_err;
+	int use_orpheus_transforms;
 
 	// basically bools, but getopt_long wants an int
 #define X_CLIENT(x_machine, x_enum, x_human) int x_machine = 0;
@@ -47,6 +48,12 @@ int main( int argc, char **argv ) {
 			.has_arg = 0,
 			.flag = NULL,
 			.val = 'h',
+		},
+		{
+			.name = "orpheus",
+			.has_arg = 1,
+			.flag = &use_orpheus_transforms,
+			.val = 1,
 		},
 #define X_CLIENT(x_machine, x_enum, x_human) { \
 	.name = #x_machine, \
@@ -75,6 +82,16 @@ int main( int argc, char **argv ) {
 	int opt_c = 0;
 	while ( ( opt_c = getopt_long( argc, argv, shortopts, longopts, NULL ) ) != -1 ) {
 		switch ( ( char )opt_c ) {
+			// other long option
+			case 0:
+				;
+				if ( use_orpheus_transforms ) {
+					grn_cat_transforms_orpheus( transforms, optarg, &in_err );
+					if ( in_err ) {
+						goto cleanup_err;
+					}
+				}
+				break;
 			// unknown option
 			case '?':
 				;
@@ -129,10 +146,8 @@ int main( int argc, char **argv ) {
 	printf( "About to process %d files.\n", files_n );
 
 	if ( vector_length( transforms ) == 0 ) {
-		grn_cat_transforms_orpheus( transforms, &in_err );
-		if ( in_err ) {
-			goto cleanup_err;
-		}
+		puts( "No transformations to apply. Try using --orpheus yourpasscode to convert from Apollo to Orpheus." );
+		goto cleanup_ok;
 	}
 
 	grn_ctx_set_files_v( ctx, files );
@@ -159,13 +174,13 @@ int main( int argc, char **argv ) {
 cleanup_err:
 	puts( grn_err_to_string( in_err ) );
 	vector_free_all( files );
-	vector_free_all( transforms );
+	grn_free_transforms_v( transforms );;;
 	grn_ctx_free( ctx, &in_err );
 	return 1;
 
 cleanup_ok:
 	vector_free_all( files );
-	vector_free_all( transforms );
+	grn_free_transforms_v( transforms );;;
 	grn_ctx_free( ctx, &in_err );
 	return 0;
 }

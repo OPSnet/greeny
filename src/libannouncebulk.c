@@ -113,6 +113,7 @@ char *grn_err_to_string( int err ) {
 		"Could not determine the path for the given bittorrent client.",
 		"Could not access the path for the given bittorrent client.",
 		"Invalid regular expression.",
+		"Orpheus passphrase/announce URL was invalid.",
 	};
 	return err_strings[err];
 }
@@ -195,11 +196,11 @@ bool normalize_announce_url( char *user_announce, char *our_announce ) {
 void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *out_err ) {
 	*out_err = GRN_OK;
 
-	char *normalized_url = malloc(OPS_URL_LENGTH);
-	ERR(normalized_url == NULL, GRN_ERR_OOM);
+	char *normalized_url = malloc( OPS_URL_LENGTH );
+	ERR( normalized_url == NULL, GRN_ERR_OOM );
 
 	ERR( !normalize_announce_url( user_announce, normalized_url ), GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
-	GRN_LOG_DEBUG("Normalized announce URL: %s", normalized_url);
+	GRN_LOG_DEBUG( "Normalized announce URL: %s", normalized_url );
 
 	// there's no fucking way this should be dynamically allocated, but it is.
 	struct grn_transform *key_subst = malloc( sizeof( struct grn_transform ) );
@@ -209,7 +210,9 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 
 	*key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
 	ERR_FW();
+	key_subst->dynamalloc = GRN_DYNAMIC_TRANSFORM_SELF | GRN_DYNAMIC_TRANSFORM_FIRST | GRN_DYNAMIC_TRANSFORM_SECOND;
 	*list_subst = *key_subst;
+	list_subst->dynamalloc = GRN_DYNAMIC_TRANSFORM_SELF | GRN_DYNAMIC_TRANSFORM_SECOND;
 
 	key_subst->key = announce_str_key;
 	list_subst->key = announce_list_key;
@@ -229,6 +232,7 @@ struct grn_transform grn_mktransform_set_string( char *key, char *val ) {
 				.val = val,
 			},
 		},
+		.dynamalloc = 0,
 	};
 }
 
@@ -240,6 +244,7 @@ struct grn_transform grn_mktransform_delete( char *key ) {
 				.key = key,
 			},
 		},
+		.dynamalloc = 0,
 	};
 }
 
@@ -252,6 +257,7 @@ struct grn_transform grn_mktransform_substitute( char *find, char *replace ) {
 				.replace = replace,
 			},
 		},
+		.dynamalloc = 0,
 	};
 }
 
@@ -264,7 +270,8 @@ struct grn_transform grn_mktransform_substitute_regex( char *find_regstr, char *
 			.substitute_regex = {
 				.replace = replace,
 			},
-		}
+		},
+		.dynamalloc = GRN_DYNAMIC_TRANSFORM_FIRST,
 	};
 
 	int regcomp_res = regcomp( &to_return.payload.substitute_regex.find, find_regstr, REG_EXTENDED );
@@ -278,6 +285,42 @@ struct grn_transform grn_mktransform_substitute_regex( char *find_regstr, char *
 	}
 
 	return to_return;
+}
+
+// this feels like such overkill for such a simple struct, but oh well
+void grn_free_transform( struct grn_transform *transform ) {
+	const int bits = transform->dynamalloc;
+	if ( bits & GRN_DYNAMIC_TRANSFORM_KEY_ELEMENTS ) {
+		for ( int i = 0; transform->key[i] != NULL; i++ ) {
+			free( transform->key[i] );
+		}
+	}
+	if ( bits & GRN_DYNAMIC_TRANSFORM_KEY ) {
+		free( transform->key );
+	}
+	if ( bits & GRN_DYNAMIC_TRANSFORM_FIRST ) {
+		if ( transform->operation == GRN_TRANSFORM_SUBSTITUTE_REGEX ) {
+			regfree( &transform->payload.substitute_regex.find );
+		} else {
+			free( transform->payload.delete_.key );
+		}
+	}
+	if ( bits & GRN_DYNAMIC_TRANSFORM_SECOND ) {
+		if ( transform->operation == GRN_TRANSFORM_SUBSTITUTE_REGEX ) {
+			free( transform->payload.substitute_regex.replace );
+		} else {
+			free( transform->payload.substitute.replace );
+		}
+	}
+	if ( bits & GRN_DYNAMIC_TRANSFORM_SELF ) {
+		free( transform );
+	}
+}
+
+void grn_free_transforms_v( struct vector *vec ) {
+	for ( int i = 0; i < vec->used_n; i++ ) {
+		grn_free_transform( vec->buffer[i] );
+	}
 }
 
 // END preset and semi-presets
@@ -724,3 +767,4 @@ void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 	// TODO: better errors for catting
 	ERR_FW();
 }
+

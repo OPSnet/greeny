@@ -38,11 +38,6 @@ struct grn_transform {
 			char *val;
 		} set_string;
 
-		struct grn_op_set_bool {
-			char *key;
-			bool val;
-		} set_bool;
-
 		struct grn_op_substitute {
 			char *find;
 			char *replace;
@@ -54,6 +49,13 @@ struct grn_transform {
 			char *replace;
 		} substitute_regex;
 	} payload;
+	enum grn_dynamic_transform {
+		GRN_DYNAMIC_TRANSFORM_SELF = 1,
+		GRN_DYNAMIC_TRANSFORM_FIRST = 2, // first element of payload, whether it's key or find
+		GRN_DYNAMIC_TRANSFORM_SECOND = 4, // second element of payload, whether it's val or replace
+		GRN_DYNAMIC_TRANSFORM_KEY = 8,
+		GRN_DYNAMIC_TRANSFORM_KEY_ELEMENTS = 16,
+	} dynamalloc;
 };
 
 struct grn_transform grn_mktransform_set_string( char *key, char *val );
@@ -61,6 +63,9 @@ struct grn_transform grn_mktransform_delete( char *key );
 struct grn_transform grn_mktransform_substitute( char *find, char *replace );
 // can fail because of regex compilation
 struct grn_transform grn_mktransform_substitute_regex( char *find_regstr, char *replace, int *out_err );
+
+void grn_free_transform( struct grn_transform *transform );
+void grn_free_transforms_v( struct vector *vec );
 
 struct grn_callback_arg {
 	// progress bar info
