@@ -103,8 +103,8 @@ struct grn_ctx {
 };
 
 struct grn_ctx *grn_ctx_alloc( int *out_err );
-void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n );
-void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files );
+void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n, int *out_err );
+void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files, int *out_err );
 void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transforms, int transforms_n );
 void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms, int *out_err );
 

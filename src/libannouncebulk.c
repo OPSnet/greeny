@@ -15,12 +15,6 @@
 #include "libannouncebulk.h"
 #include "vector.h"
 #include "err.h"
-// are you supposed to do this?
-
-// BEGIN macros
-
-
-// END macros
 
 // BEGIN context filesystem
 
@@ -32,12 +26,14 @@ void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
 	// the whole file was read or not.
 	ERR( fseek( ctx->fh, 0, SEEK_END ), GRN_ERR_FS );
 	ctx->buffer_n = ftell( ctx->fh );
+	GRN_LOG_DEBUG( "File size: %d bytes", ( int )ctx->buffer_n );
 	ERR( fseek( ctx->fh, 0, SEEK_SET ), GRN_ERR_FS );
 
-	ctx->buffer = malloc( ctx->buffer_n );
+	ctx->buffer = malloc( ctx->buffer_n + 1 );
 	ERR( ctx->buffer == NULL, GRN_ERR_OOM );
 	if ( fread( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1 ) {
 		free( ctx->buffer );
+		ctx->buffer = NULL;
 		ERR( GRN_ERR_FS );
 	}
 }
@@ -65,24 +61,50 @@ struct grn_ctx *grn_ctx_alloc( int *out_err ) {
 }
 
 void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
-	free( ctx->files );
+	*out_err = GRN_OK;
+
+	if ( ctx->files != NULL ) {
+		for (int i = 0; i < ctx->files_n; i++) {
+			if (ctx->files[i] == NULL) {
+				break;
+			}
+			free(ctx->files[i]);
+		}
+		free(ctx->files);
+	}
+	if ( ctx->transforms != NULL ) {
+		free( ctx->transforms );
+	}
 	if ( ctx->buffer != NULL ) {
 		free( ctx->buffer );
 	}
 	if ( ctx->fh != NULL ) {
-		ERR( fclose( ctx->fh ), GRN_ERR_FS );
+		// we still want to continue when the fclose fails, to free the ctx
+		if ( fclose( ctx->fh ) ) {
+			*out_err = GRN_ERR_FS;
+		}
 	}
-	RETURN_OK();
+	free( ctx );
 }
 
 // maybe I should stop pretending C is object oriented? But the ctx is supposed to be opaque, right?
-void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n ) {
-	ctx->files = files;
+void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n, int *out_err ) {
+	*out_err = GRN_OK;
+	ctx->files = malloc (sizeof(char *) * files_n);
+	ERR(ctx->files == NULL, GRN_ERR_OOM);
+	for (int i = 0; i < files_n; i++) {
+		ctx->files[i] = malloc(strlen(files[i]) + 1);
+		ERR(ctx->files[i] == NULL, GRN_ERR_OOM);
+		strcpy(ctx->files[i], files[i]);
+	}
 	ctx->files_n = files_n;
 }
 
-void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files ) {
-	ctx->files = ( char ** ) vector_export( files, &ctx->files_n );
+void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files, int *out_err ) {
+	*out_err = GRN_OK;
+	int files_n;
+	char **vec_files = ( char ** ) vector_export( files, &files_n );
+	grn_ctx_set_files( ctx, vec_files, files_n, out_err );
 }
 
 void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transforms, int transforms_n ) {
@@ -133,7 +155,7 @@ int bencode_error_to_anb( int bencode_error ) {
 const char OPS_PASSPHRASE_PREFIX[] = "https://opsfet.ch/";
 const char OPS_PASSPHRASE_SUFFIX[] = "/announce";
 const int OPS_PASSPHRASE_LENGTH = 32;
-const int OPS_URL_LENGTH = 59;
+const int OPS_URL_LENGTH = 60;
 
 char *announce_str_key[] = {
 	"announce",
@@ -212,7 +234,7 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	ERR_FW();
 	key_subst->dynamalloc = GRN_DYNAMIC_TRANSFORM_SELF | GRN_DYNAMIC_TRANSFORM_FIRST | GRN_DYNAMIC_TRANSFORM_SECOND;
 	*list_subst = *key_subst;
-	list_subst->dynamalloc = GRN_DYNAMIC_TRANSFORM_SELF | GRN_DYNAMIC_TRANSFORM_SECOND;
+	list_subst->dynamalloc = GRN_DYNAMIC_TRANSFORM_SELF;
 
 	key_subst->key = announce_str_key;
 	list_subst->key = announce_list_key;
@@ -321,6 +343,7 @@ void grn_free_transforms_v( struct vector *vec ) {
 	for ( int i = 0; i < vec->used_n; i++ ) {
 		grn_free_transform( vec->buffer[i] );
 	}
+	vector_free( vec );
 }
 
 // END preset and semi-presets
@@ -525,6 +548,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 
 	free( ctx->buffer );
 	ctx->buffer = ben_encode( &ctx->buffer_n, main_dict );
+	GRN_LOG_DEBUG( "Newly encoded file size: %d", ( int )ctx->buffer_n );
 	ERR( ctx->buffer == NULL, GRN_ERR_OOM );
 	goto cleanup;
 cleanup:
@@ -546,8 +570,9 @@ void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	// close the previously processing file
-	if ( ctx->fh ) {
+	if ( ctx->fh != NULL ) {
 		ERR( fclose( ctx->fh ), GRN_ERR_FS );
+		ctx->fh = NULL;
 	}
 
 	ctx->files_c++;

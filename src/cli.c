@@ -150,7 +150,12 @@ int main( int argc, char **argv ) {
 		goto cleanup_ok;
 	}
 
-	grn_ctx_set_files_v( ctx, files );
+	// TODO: we don't need the vectors anymore after this, so get rid of them!
+	grn_ctx_set_files_v( ctx, files, &in_err );
+	if ( in_err ) {
+		puts( "Error setting files." );
+		goto cleanup_err;
+	}
 	grn_ctx_set_transforms_v( ctx, transforms, &in_err );
 	if ( in_err ) {
 		puts( "Error setting transforms." );
@@ -180,7 +185,7 @@ cleanup_err:
 
 cleanup_ok:
 	vector_free_all( files );
-	grn_free_transforms_v( transforms );;;
+	grn_free_transforms_v( transforms );
 	grn_ctx_free( ctx, &in_err );
 	return 0;
 }
