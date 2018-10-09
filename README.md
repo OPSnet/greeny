@@ -1,13 +1,17 @@
 Greeny is the Graphical, Really Easy Editor for torreNts, Yup!
 
-## Dependencies
+## Linux & Mac Dependencies
 
-* C compiler
-* MinGW (if you want to build for Windows)
-* GTK Development libraries (if you want to build for Linux or Mac)
+* GCC (clang will probably work too, but praise Stallman!)
+* Make
+* GTK+ with development headers
+
+## Windows Cross-Compilation Dependencies
+
+* MinGW Cross-compiler
+* MinGW Make
+* MinGW libgnurx with development headers (this is because MinGW does not ship with the POSIX regular expression libraries).
 
 ## Compiling
 
-Run `make` to build for your own system, assuming you're on Linux or Mac (Autotools? You almost fooled me). To build for Windows, install the mingw cross compiler (or, ya know, just install it normally on Windows) and run the mingw make tool (often `mingw64-make` for the cross-compiler). Be sure to `make clean` between runs, otherwise you might end up trying to link Linux objects into a Windows executable!
-
-On all platforms, dependencies are compiled statically, and no packaging or installers are needed.
+`make` will build for your native Linux or Mac. Use the mingw cross compiler's built-in make tool (often `mingw64-make`) to build for Windows. Build artifacts and binaries will be put in a separate folder (build/windows), so you can switch between make and mingw64-make as often as you'd like. Binaries will be put in build/native/bin for Linux/Mac, and build/windows/bin for Windows.
