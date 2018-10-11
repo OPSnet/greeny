@@ -2,22 +2,60 @@
 #define H_ERR
 
 #include <stdio.h>
+#include <stdbool.h>
+#include <assert.h>
 
 enum {
 	GRN_OK = 0,
 	GRN_ERR_OOM,
 	GRN_ERR_FS,
-	GRN_ERR_WRONG_BENCODE_TYPE,
-	GRN_ERR_WRONG_TRANSFORM_OPERATION,
-	GRN_ERR_WRONG_CTX_STATE,
-	GRN_ERR_WRONG_CLIENT,
 	GRN_ERR_BENCODE_SYNTAX, // represents BEN errors 1, 2, 4. Ben error 0 is GRN_OK, 3 is GRN_ERR_OOM
 	GRN_ERR_NO_CLIENT_PATH, // unable to determine the path for a client
 	GRN_ERR_READ_CLIENT_PATH, // able to determine the path a client should have, but it did not exist
 	GRN_ERR_REGEX_SYNTAX,
 	GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX,
+	GRN_ERR_UNKNOWN_CLI_OPT,
 };
 
+static char *grn_err_to_string( int err ) {
+	switch ( err ) {
+#define X_ERR(en, hm) case en: return hm;
+			X_ERR( GRN_OK, "Successful" )
+			X_ERR( GRN_ERR_OOM, "Out of memory" )
+			X_ERR( GRN_ERR_FS, "Filesystem error" )
+			X_ERR( GRN_ERR_BENCODE_SYNTAX, "Invalid bencode syntax" )
+			X_ERR( GRN_ERR_NO_CLIENT_PATH, "Unable to determine torrent path for a client" )
+			X_ERR( GRN_ERR_READ_CLIENT_PATH, "A torrent path for a client was unreadable" )
+			X_ERR( GRN_ERR_REGEX_SYNTAX, "Invalid regex syntax" )
+			X_ERR( GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX, "Invalid Orpheus announce URL/passkey syntax" )
+			X_ERR( GRN_ERR_UNKNOWN_CLI_OPT, "Unrecognized CLI option" )
+#undef X_ERR
+	};
+	assert( false );
+	return NULL;
+}
+
+/**
+ * Determines if a context can continue processing after this error
+ */
+static bool grn_err_is_single_file( int err ) {
+	return err == GRN_ERR_FS ||
+	       err == GRN_ERR_BENCODE_SYNTAX;
+}
+
+/**
+ * Determines if an error is of such severity that the program should be immediately terminated
+ * These can occur due to runtime conditions, hence no `assert`
+ */
+static bool grn_err_is_fatal( int err ) {
+	return err == GRN_ERR_OOM;
+}
+
+static void grn_free( void *arg ) {
+	if ( arg != NULL ) {
+		free( arg );
+	}
+}
 
 #define ERR1(error)                do { \
                                       *out_err = error; \

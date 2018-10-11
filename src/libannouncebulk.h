@@ -8,7 +8,6 @@
 #include "vector.h"
 
 int ben_error_to_anb( int bencode_error );
-char *grn_err_to_string( int err );
 
 enum grn_operation {
 	GRN_TRANSFORM_DELETE,
@@ -65,6 +64,7 @@ struct grn_transform grn_mktransform_substitute( char *find, char *replace );
 struct grn_transform grn_mktransform_substitute_regex( char *find_regstr, char *replace, int *out_err );
 
 void grn_free_transform( struct grn_transform *transform );
+// frees the vector too
 void grn_free_transforms_v( struct vector *vec );
 
 struct grn_callback_arg {
@@ -103,10 +103,14 @@ struct grn_ctx {
 };
 
 struct grn_ctx *grn_ctx_alloc( int *out_err );
-void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n, int *out_err );
-void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files, int *out_err );
+// assumes that individual files are dynamically allocated, as well as the whole
+void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n );
+// takes ownership of the vector, do not free it
+// also assumes that all individual files are dynamically allocated
+void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files );
 void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transforms, int transforms_n );
-void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms, int *out_err );
+// takes ownership of the vector, do not free it
+void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms );
 
 /**
  * Free a context

@@ -21,10 +21,11 @@ static void test_vector( void **state ) {
 	( void ) state;
 	int in_err;
 
-	struct vector *vec = vector_alloc( &in_err );
+	struct vector *vec = vector_alloc( sizeof( int ), &in_err );
 	ASSERT_OK();
 	assert_int_equal( vec->allocated_n, 1 );
 	assert_int_equal( vec->used_n, 0 );
+	assert_int_equal( vec->sz, sizeof( int ) );
 	assert_non_null( vec->buffer );
 
 	int a = 42, b = 43;
@@ -35,14 +36,13 @@ static void test_vector( void **state ) {
 
 	assert_int_equal( vec->allocated_n, 2 );
 	assert_int_equal( vec->used_n, 2 );
-	assert_int_equal( *( ( int * )vec->buffer[1] ), b );
+	assert_int_equal( ( ( int * )vec->buffer )[1] , b );
 
 	int export_length;
-	void **export_buffer = vector_export( vec, &export_length );
+	void *pre_export_buffer = vec->buffer;
+	void *export_buffer = vector_export( vec, &export_length );
 	assert_int_equal( export_length, 2 );
-	assert_ptr_equal( export_buffer, vec->buffer );
-
-	vector_free( vec );
+	assert_ptr_equal( export_buffer, pre_export_buffer );
 }
 
 char *strsubst( const char *haystack, const char *find, const char *replace, int *out_err );
@@ -105,7 +105,7 @@ void _assert_transform_buffer_single( const char *buffer, struct grn_transform t
 	strcpy( my_ctx.buffer, buffer );
 	transform_buffer( &my_ctx, &in_err );
 	ASSERT_OK();
-	assert_memory_equal( my_ctx.buffer, expected_buffer, my_ctx.buffer_n);
+	assert_memory_equal( my_ctx.buffer, expected_buffer, my_ctx.buffer_n );
 	free( my_ctx.buffer );
 }
 
@@ -194,14 +194,14 @@ static void test_normalize_orpheus_announce( void **state ) {
 	assert_string_equal( our_announce, "https://opsfet.ch/abcdef1234567890abcdef1234567890/announce" );
 }
 
-#define RECAT_ORPHEUS_TRANSFORMS(ann) my_vec = vector_alloc(&in_err); \
+#define RECAT_ORPHEUS_TRANSFORMS(ann) my_vec = vector_alloc(sizeof(struct grn_transform), &in_err); \
 assert_int_equal(in_err, GRN_OK); \
 grn_cat_transforms_orpheus(my_vec, ann, &in_err);
 
 static void test_cat_orpheus_transforms( void **state ) {
 	( void ) state;
 	int in_err;
-	struct vector *my_vec;
+	struct vector *my_vec = vector_alloc( sizeof( struct grn_transform ), &in_err );
 
 	RECAT_ORPHEUS_TRANSFORMS( NULL );
 	assert_int_equal( in_err, GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
@@ -210,34 +210,34 @@ static void test_cat_orpheus_transforms( void **state ) {
 
 	RECAT_ORPHEUS_TRANSFORMS( "https://flacsfor.me/abcdef0123456789abcdef0123456789/announce" );
 	assert_int_equal( in_err, GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
-	vector_free_all( my_vec );
+	grn_free_transforms_v( my_vec );
 
 	RECAT_ORPHEUS_TRANSFORMS( "abcdef0123456789abcdef0123456789" );
 	ASSERT_OK();
 	_assert_transform_buffer_single(
 	    "d8:announce65:https://mars.apollo.rip/abcdef0123456789abcdef0123456789/announcee",
-	    *( ( struct grn_transform * ) my_vec->buffer[0] ),
+	    * ( struct grn_transform * ) my_vec->buffer,
 	    "d8:announce59:https://opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
 	);
-	vector_free_all( my_vec );
+	grn_free_transforms_v( my_vec );
 
 	RECAT_ORPHEUS_TRANSFORMS( "abcdef0123456789abcdef0123456789" );
 	ASSERT_OK();
 	_assert_transform_buffer_single(
 	    "d8:announce60:https://xanax.rip/abcdef0123456789abcdef0123456789/announce/e",
-	    *( ( struct grn_transform * ) my_vec->buffer[0] ),
+	    * ( struct grn_transform * ) my_vec->buffer,
 	    "d8:announce59:https://opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
 	);
-	vector_free_all( my_vec );
+	grn_free_transforms_v( my_vec );
 
 	RECAT_ORPHEUS_TRANSFORMS( "abcdef0123456789abcdef0123456789" );
 	ASSERT_OK();
 	_assert_transform_buffer_single(
 	    "d8:announce65:https://maps.apollo.rip/abcdef0123456789abcdef0123456789/announcee",
-	    *( ( struct grn_transform * ) my_vec->buffer[0] ),
+	    * ( struct grn_transform * ) my_vec->buffer,
 	    "d8:announce65:https://maps.apollo.rip/abcdef0123456789abcdef0123456789/announcee"
 	);
-	vector_free_all( my_vec );
+	grn_free_transforms_v( my_vec );
 }
 
 int main( void ) {
@@ -253,5 +253,6 @@ int main( void ) {
 
 	return cmocka_run_group_tests( tests, NULL, NULL );
 }
+
 
 

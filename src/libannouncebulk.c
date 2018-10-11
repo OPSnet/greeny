@@ -64,20 +64,22 @@ void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	if ( ctx->files != NULL ) {
-		for (int i = 0; i < ctx->files_n; i++) {
-			if (ctx->files[i] == NULL) {
+		for ( int i = 0; i < ctx->files_n; i++ ) {
+			if ( ctx->files[i] == NULL ) {
 				break;
 			}
-			free(ctx->files[i]);
+			free( ctx->files[i] );
 		}
-		free(ctx->files);
+		free( ctx->files );
 	}
+
 	if ( ctx->transforms != NULL ) {
+		for ( int i = 0; i < ctx->transforms_n; i++ ) {
+			grn_free_transform( ctx->transforms + i );
+		}
 		free( ctx->transforms );
 	}
-	if ( ctx->buffer != NULL ) {
-		free( ctx->buffer );
-	}
+	grn_free( ctx->buffer );
 	if ( ctx->fh != NULL ) {
 		// we still want to continue when the fclose fails, to free the ctx
 		if ( fclose( ctx->fh ) ) {
@@ -88,23 +90,13 @@ void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
 }
 
 // maybe I should stop pretending C is object oriented? But the ctx is supposed to be opaque, right?
-void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n, int *out_err ) {
-	*out_err = GRN_OK;
-	ctx->files = malloc (sizeof(char *) * files_n);
-	ERR(ctx->files == NULL, GRN_ERR_OOM);
-	for (int i = 0; i < files_n; i++) {
-		ctx->files[i] = malloc(strlen(files[i]) + 1);
-		ERR(ctx->files[i] == NULL, GRN_ERR_OOM);
-		strcpy(ctx->files[i], files[i]);
-	}
+void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n ) {
+	ctx->files = files;
 	ctx->files_n = files_n;
 }
 
-void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files, int *out_err ) {
-	*out_err = GRN_OK;
-	int files_n;
-	char **vec_files = ( char ** ) vector_export( files, &files_n );
-	grn_ctx_set_files( ctx, vec_files, files_n, out_err );
+void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files ) {
+	ctx->files = ( char ** ) vector_export( files, &ctx->files_n );
 }
 
 void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transforms, int transforms_n ) {
@@ -112,34 +104,9 @@ void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transfor
 	ctx->transforms_n = transforms_n;
 }
 
-void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms, int *out_err ) {
-	*out_err = GRN_OK;
-
-	// THE TRANSFORMS ARE NOT IN CONTIGUOUs MEMORY ONLY THE POINTERS AHHHHH// THE TRANSFORMS ARE NOT IN CONTIGUOUs MEMORY ONLY THE POINTERS AHHHHH// THE TRANSFORMS ARE NOT IN CONTIGUOUs MEMORY ONLY THE POINTERS AHHHHH
-	// ^^^ i'm not sure what key i hit to duplicate it but i think i will let it stay
-	struct grn_transform **ptrs = ( struct grn_transform ** ) vector_export( transforms, &ctx->transforms_n );
-	ctx->transforms = grn_flatten_ptrs( ( void ** )ptrs, ctx->transforms_n, sizeof( struct grn_transform ), out_err );
-	ERR_FW();
+void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms ) {
+	ctx->transforms = ( struct grn_transform * ) vector_export( transforms, &ctx->transforms_n );
 }
-
-char *grn_err_to_string( int err ) {
-	static char *err_strings[] = {
-		"Successful.",
-		"Out of memory.",
-		"Filesystem error.",
-		"Wrong bencode type (eg, int where string expected).",
-		"Wrong transform operation (unknown).",
-		"Context was in an unexpected state.",
-		"An unknown bittorrent client was specified.",
-		"Bencode syntax error.",
-		"Could not determine the path for the given bittorrent client.",
-		"Could not access the path for the given bittorrent client.",
-		"Invalid regular expression.",
-		"Orpheus passphrase/announce URL was invalid.",
-	};
-	return err_strings[err];
-}
-
 
 int bencode_error_to_anb( int bencode_error ) {
 	if ( bencode_error == BEN_OK ) return GRN_OK;
@@ -225,23 +192,21 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	GRN_LOG_DEBUG( "Normalized announce URL: %s", normalized_url );
 
 	// there's no fucking way this should be dynamically allocated, but it is.
-	struct grn_transform *key_subst = malloc( sizeof( struct grn_transform ) );
-	ERR( key_subst == NULL, GRN_ERR_OOM );
-	struct grn_transform *list_subst = malloc( sizeof( struct grn_transform ) );
-	ERR( list_subst == NULL, GRN_ERR_OOM );
+	struct grn_transform key_subst;
+	struct grn_transform list_subst;
 
-	*key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
+	key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
 	ERR_FW();
-	key_subst->dynamalloc = GRN_DYNAMIC_TRANSFORM_SELF | GRN_DYNAMIC_TRANSFORM_FIRST | GRN_DYNAMIC_TRANSFORM_SECOND;
-	*list_subst = *key_subst;
-	list_subst->dynamalloc = GRN_DYNAMIC_TRANSFORM_SELF;
+	key_subst.dynamalloc = GRN_DYNAMIC_TRANSFORM_FIRST | GRN_DYNAMIC_TRANSFORM_SECOND;
+	list_subst = key_subst;
+	list_subst.dynamalloc = 0;
 
-	key_subst->key = announce_str_key;
-	list_subst->key = announce_list_key;
+	key_subst.key = announce_str_key;
+	list_subst.key = announce_list_key;
 
-	vector_push( vec, key_subst, out_err );
+	vector_push( vec, &key_subst, out_err );
 	ERR_FW();
-	vector_push( vec, list_subst, out_err );
+	vector_push( vec, &list_subst, out_err );
 	ERR_FW();
 }
 
@@ -340,10 +305,11 @@ void grn_free_transform( struct grn_transform *transform ) {
 }
 
 void grn_free_transforms_v( struct vector *vec ) {
-	for ( int i = 0; i < vec->used_n; i++ ) {
-		grn_free_transform( vec->buffer[i] );
+	int transforms_n;
+	struct grn_transform *transforms = vector_export( vec, &transforms_n );
+	for ( int i = 0; i < transforms_n; i++ ) {
+		grn_free_transform( &transforms[i] );
 	}
-	vector_free( vec );
 }
 
 // END preset and semi-presets
@@ -541,7 +507,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 				break;
 			default:
 				;
-				ERR( GRN_ERR_WRONG_TRANSFORM_OPERATION );
+				assert( false );
 				break;
 		}
 	}
@@ -645,7 +611,7 @@ bool grn_one_step( struct grn_ctx *ctx, int *out_err ) {
 			break;
 		default:
 			;
-			*out_err = GRN_ERR_WRONG_CTX_STATE;
+			assert( false );
 			return false;
 			break;
 	}
@@ -701,7 +667,7 @@ int cat_nftw_cb( const char *path, const struct stat *st, int file_type, struct 
 		return GRN_ERR_OOM;
 	}
 	strcpy( path_cp, path );
-	vector_push( cat_vec, path_cp, &in_err );
+	vector_push( cat_vec, &path_cp, &in_err );
 	return in_err;
 }
 
@@ -770,7 +736,7 @@ void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 #endif
 			break;
 		default:
-			*out_err = GRN_ERR_WRONG_CLIENT;
+			assert( false );
 			return;
 			break;
 	}
