@@ -29,6 +29,7 @@ binary_test    := $(bin_dir)/greeny-test$(binary_suffix)
 iup_dir        ?= vendor/iup
 # deferred -> immediate
 iup_dir        := $(iup_dir)
+iup_include    := $(iup_dir)/include
 iup_makedir    := $(iup_dir)/src
 ifdef windows
 	iup_a  := $(iup_dir)/lib/mingw6_64/libiup.a
@@ -48,23 +49,26 @@ ifdef windows
 	LIBS_gui       := $(iup_a) -lgdi32 -lcomdlg32 -lcomctl32 -luuid -loleaut32 -lole32
 else
 	LIBS_cli       := 
-	LIBS_gui       := $(iup_a) $(shell pkg-config --libs gtk+-3.0) -lX11
+	LIBS_gui       := $(iup_a) $(shell pkg-config --libs gtk+-3.0) -lX11 -lm
 endif
 LIBS_test              := -lcmocka
 
-### CFLAGS
-CFLAGS         := $(CFLAGS) -Icontrib -Wall --std=c99
+### FLAGS
+CFLAGS         := $(CFLAGS) -I$(iup_include) -Icontrib -Wall --std=c99
 
-all: $(binary_cli)
+all: $(binary_gui) $(binary_cli)
 
 test: $(binary_test)
 	$(binary_test)
 
+$(binary_gui) : $(objs_gui) $(iup_a)
+	$(CC) $(LDFLAGS) -o $(binary_gui) $(objs_gui) $(LIBS_gui)
+
 $(binary_cli) : $(objs_cli)
-	$(CC) -o $(binary_cli) $(objs_cli) $(LIBS_cli)
+	$(CC) $(LDFLAGS) -o $(binary_cli) $(objs_cli) $(LIBS_cli)
 
 $(binary_test) : $(objs_test)
-	$(CC) -o $(binary_test) $(objs_test) $(LIBS_test)
+	$(CC) $(LDFLAGS) -o $(binary_test) $(objs_test) $(LIBS_test)
 
 $(obj_dir)/%.o : */%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
