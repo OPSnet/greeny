@@ -8,7 +8,12 @@
 enum {
 	GRN_OK = 0,
 	GRN_ERR_OOM,
-	GRN_ERR_FS,
+	GRN_ERR_FS_SEEK,
+	GRN_ERR_FS_READ,
+	GRN_ERR_FS_WRITE,
+	GRN_ERR_FS_OPEN,
+	GRN_ERR_FS_CLOSE,
+	GRN_ERR_FS_NFTW,
 	GRN_ERR_BENCODE_SYNTAX, // represents BEN errors 1, 2, 4. Ben error 0 is GRN_OK, 3 is GRN_ERR_OOM
 	GRN_ERR_NO_CLIENT_PATH, // unable to determine the path for a client
 	GRN_ERR_READ_CLIENT_PATH, // able to determine the path a client should have, but it did not exist
@@ -22,7 +27,12 @@ static char *grn_err_to_string( int err ) {
 #define X_ERR(en, hm) case en: return hm;
 			X_ERR( GRN_OK, "Successful" )
 			X_ERR( GRN_ERR_OOM, "Out of memory" )
-			X_ERR( GRN_ERR_FS, "Filesystem error" )
+			X_ERR( GRN_ERR_FS_SEEK, "Filesystem error: SEEK" )
+			X_ERR( GRN_ERR_FS_READ, "Filesystem error: read" )
+			X_ERR( GRN_ERR_FS_WRITE, "Filesystem error: write" )
+			X_ERR( GRN_ERR_FS_OPEN, "Filesystem error: open" )
+			X_ERR( GRN_ERR_FS_CLOSE, "Filesystem error: close" )
+			X_ERR( GRN_ERR_FS_NFTW, "Filesystem error: nftw/recursive search" )
 			X_ERR( GRN_ERR_BENCODE_SYNTAX, "Invalid bencode syntax" )
 			X_ERR( GRN_ERR_NO_CLIENT_PATH, "Unable to determine torrent path for a client" )
 			X_ERR( GRN_ERR_READ_CLIENT_PATH, "A torrent path for a client was unreadable" )
@@ -39,7 +49,11 @@ static char *grn_err_to_string( int err ) {
  * Determines if a context can continue processing after this error
  */
 static bool grn_err_is_single_file( int err ) {
-	return err == GRN_ERR_FS ||
+	return err == GRN_ERR_FS_SEEK ||
+	       err == GRN_ERR_FS_READ ||
+	       err == GRN_ERR_FS_WRITE ||
+	       err == GRN_ERR_FS_OPEN ||
+	       err == GRN_ERR_FS_CLOSE ||
 	       err == GRN_ERR_BENCODE_SYNTAX;
 }
 

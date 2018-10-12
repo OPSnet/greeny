@@ -93,9 +93,9 @@ struct grn_ctx {
 	struct grn_transform *transforms;
 	int transforms_n;
 	char **files;
-	int *file_errors; // non-fatal errors for each individual file
 	int files_c; // index to the currently processing file
 	int files_n;
+	int file_error; // error during processing current file. Only recoverable errors.
 	int state; // represents what to do next (sometimes this coincides with what is in progress)
 	FILE *fh;
 	char *buffer;
@@ -111,6 +111,14 @@ void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files );
 void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transforms, int transforms_n );
 // takes ownership of the vector, do not free it
 void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms );
+
+bool grn_ctx_get_is_done( struct grn_ctx *ctx );
+// the path of the currently / just processed file
+char *grn_ctx_get_c_path( struct grn_ctx *ctx );
+char *grn_ctx_get_next_path( struct grn_ctx *ctx );
+int grn_ctx_get_c_error( struct grn_ctx *ctx );
+// returns the progress as it would be after the current file is done processing.
+double grn_ctx_get_progress( struct grn_ctx *ctx );
 
 /**
  * Free a context
@@ -131,7 +139,8 @@ void grn_ctx_free( struct grn_ctx *ctx, int *out_err );
 bool grn_one_step( struct grn_ctx *ctx, int *out_err );
 
 /**
- * Continue processing a context until a file is complete.
+ * Continue processing a context until the current file is done, but does not proceed to the next file.
+ * You can use grn_ctx_get_c_path, etc after calling this.
  * Repeatedly calls grn_one_step internally.
  * @param ctx a grn context
  * @return whether the context is done being processed

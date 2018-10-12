@@ -21,28 +21,30 @@
 void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	assert( ctx->state == GRN_CTX_READ );
+	assert( ctx->fh != NULL );
 
 	// we can't just do fread(buffer, 1, some_massive_num, fh) because we can't be sure whether
 	// the whole file was read or not.
-	ERR( fseek( ctx->fh, 0, SEEK_END ), GRN_ERR_FS );
+	ERR( fseek( ctx->fh, 0, SEEK_END ), GRN_ERR_FS_SEEK );
 	ctx->buffer_n = ftell( ctx->fh );
 	GRN_LOG_DEBUG( "File size: %d bytes", ( int )ctx->buffer_n );
-	ERR( fseek( ctx->fh, 0, SEEK_SET ), GRN_ERR_FS );
+	ERR( fseek( ctx->fh, 0, SEEK_SET ), GRN_ERR_FS_SEEK );
 
 	ctx->buffer = malloc( ctx->buffer_n + 1 );
 	ERR( ctx->buffer == NULL, GRN_ERR_OOM );
 	if ( fread( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1 ) {
 		free( ctx->buffer );
 		ctx->buffer = NULL;
-		ERR( GRN_ERR_FS );
+		ERR( GRN_ERR_FS_READ );
 	}
 }
 
 void fwrite_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	assert( ctx->state == GRN_CTX_WRITE );
+	assert( ctx->fh != NULL );
 
-	ERR( fwrite( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1, GRN_ERR_FS );
+	ERR( fwrite( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1, GRN_ERR_FS_WRITE );
 }
 
 // END context filesystem
@@ -83,7 +85,7 @@ void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
 	if ( ctx->fh != NULL ) {
 		// we still want to continue when the fclose fails, to free the ctx
 		if ( fclose( ctx->fh ) ) {
-			*out_err = GRN_ERR_FS;
+			*out_err = GRN_ERR_FS_CLOSE;
 		}
 	}
 	free( ctx );
@@ -454,7 +456,13 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	int bencode_error;
 	size_t off = 0;
 	struct bencode *main_dict = ben_decode2( ctx->buffer, ctx->buffer_n, &off, &bencode_error );
-	ERR( bencode_error, bencode_error_to_anb( bencode_error ) );
+	if ( bencode_error ) {
+		*out_err = bencode_error_to_anb( bencode_error );
+		if (main_dict != NULL) {
+			ben_free( main_dict );
+		}
+		return;
+	}
 
 	for ( int i = 0; i < ctx->transforms_n; i++ ) {
 		struct grn_transform transform = ctx->transforms[i];
@@ -528,20 +536,30 @@ cleanup:
 void freopen_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	// it will get fclosed by the caller with grn_ctx_free
-	ctx->fh = freopen( NULL, "w", ctx->fh );
-	ERR( ctx->fh == NULL, GRN_ERR_FS );
+	FILE *reopened_fh = freopen( NULL, "w", ctx->fh );
+	ERR( reopened_fh == NULL, GRN_ERR_FS_OPEN );
+	ctx->fh = reopened_fh;
 }
 
+// cleanup after a potentially failed single file then proceed to the next file
 void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
+	GRN_LOG_DEBUG( "Next: file %d to %d", ctx->files_c, ctx->files_c + 1 );
+	ctx->files_c++;
+	ctx->file_error = GRN_OK;
+
+	grn_free( ctx->buffer );
+	ctx->buffer = NULL;
 	// close the previously processing file
 	if ( ctx->fh != NULL ) {
-		ERR( fclose( ctx->fh ), GRN_ERR_FS );
+		// TODO: have a separate GRN_CTX_CLOSE state
+		if ( fclose( ctx->fh ) ) {
+			*out_err = GRN_ERR_FS_CLOSE;
+		}
 		ctx->fh = NULL;
 	}
 
-	ctx->files_c++;
 	// are we done?
 	if ( ctx->files_c >= ctx->files_n ) {
 		ctx->state = GRN_CTX_DONE;
@@ -549,7 +567,7 @@ void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
 	}
 
 	// prepare the next file for reading
-	ERR( !( ctx->fh = fopen( ctx->files[ctx->files_c], "r" ) ), GRN_ERR_FS );
+	ERR( ( ctx->fh = fopen( ctx->files[ctx->files_c], "r" ) ) == NULL, GRN_ERR_FS_OPEN );
 	ctx->state = GRN_CTX_READ;
 }
 
@@ -558,19 +576,27 @@ void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
 bool grn_one_step( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
+#define GRN_STEP_ERR() do { \
+	if ( *out_err ) { \
+		if ( grn_err_is_single_file ( *out_err ) ) { \
+			ctx->file_error = *out_err; \
+			ctx->state = GRN_CTX_NEXT; \
+			*out_err = GRN_OK; \
+		} \
+		return false; \
+	} \
+} while (0)
+
+	GRN_LOG_DEBUG( "Stepping -- current state: %d", ctx->state );
 	switch ( ctx->state ) {
 		case GRN_CTX_DONE:
 			;
-			return true;
 			break;
 		case GRN_CTX_REOPEN:
 			;
 			freopen_ctx( ctx, out_err );
-			if ( *out_err ) {
-				return false;
-			}
+			GRN_STEP_ERR();
 			ctx->state = GRN_CTX_WRITE;
-			return false;
 			break;
 		case GRN_CTX_READ:
 			;
@@ -578,56 +604,53 @@ bool grn_one_step( struct grn_ctx *ctx, int *out_err ) {
 			// fread_ctx will only "throw" an error if it's not an FS problem (which indicates file specific problem).
 			// TODO: consider and maybe actually do what is described just above
 			fread_ctx( ctx, out_err );
-			// fuckin macros
-			if ( *out_err ) {
-				// mostly just to be safe, since we don't reassign later it would probably be ok without this.
-				return false;
-			}
+			GRN_STEP_ERR();
 			ctx->state = GRN_CTX_TRANSFORM;
-			return false;
 			// TODO: once we add non-blocking, call grn_one_step again here
 			break;
 		case GRN_CTX_WRITE:
 			;
 			fwrite_ctx( ctx, out_err );
+			GRN_STEP_ERR();
 			ctx->state = GRN_CTX_NEXT;
-			return false;
 			break;
 		case GRN_CTX_TRANSFORM:
 			;
 			transform_buffer( ctx, out_err );
+			GRN_STEP_ERR();
 			ctx->state = GRN_CTX_REOPEN;
 			// TODO: run grn_one_step again
-			return false;
 			break;
 		case GRN_CTX_NEXT:
 			;
 			// unlike some of the other functions, next_file_ctx internally updates ctx->state
 			next_file_ctx( ctx, out_err );
-			if ( *out_err ) {
-				return false;
-			}
-			return ctx->state == GRN_CTX_DONE;
+			GRN_STEP_ERR();
 			break;
 		default:
 			;
 			assert( false );
-			return false;
 			break;
 	}
+
+	return ctx->state == GRN_CTX_DONE;
 }
 
 bool grn_one_file( struct grn_ctx *ctx, int *out_err ) {
+	// essentially: Make sure we're starting right after a file, then run until we are about to start the next file
 	*out_err = GRN_OK;
 
+	if ( ctx->state == GRN_CTX_DONE ) {
+		return true;
+	}
+	assert( ctx->state == GRN_CTX_NEXT );
 	// it is set to -1 on allocation
-	int files_c_old = ctx->files_c == -1 ? 0 : ctx->files_c;
-	while ( ctx->files_c <= files_c_old && ctx->state != GRN_CTX_DONE ) {
+	do {
 		grn_one_step( ctx, out_err );
 		if ( *out_err ) {
 			return false;
 		}
-	}
+	} while ( ctx->state != GRN_CTX_NEXT && ctx->state != GRN_CTX_DONE );
 	return ctx->state == GRN_CTX_DONE;
 }
 
@@ -680,15 +703,22 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
 	int nftw_err = nftw( path, cat_nftw_cb, 16, 0 );
 	if ( nftw_err ) {
 		// if nftw returns -1, it means there was some internal problem. Any other error means that our cb failed.
-		*out_err = nftw_err == -1 ? GRN_ERR_FS : nftw_err;
+		*out_err = nftw_err == -1 ? GRN_ERR_FS_NFTW : nftw_err;
 		return;
 	}
 }
 
+/**
+ * Here's how different torrent clients handle things:
+ *   - Transmission: Uses the on-disk torrent for everything, fuckin' noice m88! The resume file does not store the tracker.
+ *   - Deluge: Has a global fastresume file at ~/.config/deluge/torrents.fastresume in bencode format. The keys are info hashes, but, i fuck you not, the values are strings of bencode that must be parsed! In each of those sub-dictionaries, the "trackers" array contains the ~~good~~ bad shit.
+ *   - qBittorrent: Has separate fastresume files in the same folder as the main torrent. The "trackers" key must be modified.
+ *   - uTorrent is also bencode. Each key in the root dict is the name of a .torrent file. Inside is a "trackers" list.
+ */
 void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 	*out_err = GRN_OK;
 
-	char *state_path = NULL, *home_path, *full_path;
+	char *state_path = NULL, *home_path, *full_path = NULL;
 	bool use_home = true;
 
 	// TODO: does this work in Windows? Should we get appdata instead?
@@ -753,9 +783,55 @@ void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 		full_path = state_path;
 	}
 
-	ERR( access( full_path, R_OK | X_OK ), GRN_ERR_READ_CLIENT_PATH );
-	grn_cat_torrent_files( vec, full_path, NULL, out_err );
+	if ( access( full_path, R_OK | X_OK ) ) {
+		*out_err = GRN_ERR_READ_CLIENT_PATH;
+		goto cleanup;
+	}
+	grn_cat_torrent_files( vec, full_path, ".torrent", out_err );
+	if ( *out_err ) {
+		goto cleanup;
+	}
+	grn_cat_torrent_files( vec, full_path, ".fastresume", out_err );
+	if ( out_err ) {
+		goto cleanup;
+	}
 	// TODO: better errors for catting
-	ERR_FW();
+
+cleanup:
+	grn_free( full_path );
 }
+
+// BEGIN get info
+
+bool grn_ctx_get_is_done( struct grn_ctx *ctx ) {
+	return ctx->state == GRN_CTX_DONE;
+}
+
+char *grn_ctx_get_c_path( struct grn_ctx *ctx ) {
+	assert( ctx->files_c >= 0 );
+	assert( ctx->files_c < ctx->files_n );
+	return ctx->files[ctx->files_c];
+}
+
+char *grn_ctx_get_next_path( struct grn_ctx *ctx ) {
+	if ( ctx->files_c + 1 < ctx->files_n ) {
+		return ctx->files[ctx->files_c + 1];
+	} else {
+		return NULL;
+	}
+}
+
+int grn_ctx_get_c_error( struct grn_ctx *ctx ) {
+	assert( ctx->files_c >= 0 );
+	return ctx->file_error;
+}
+
+double grn_ctx_get_progress( struct grn_ctx *ctx ) {
+	assert( ctx->files_c < ctx->files_n );
+	return ( double )( ctx->files_c + 1 ) / ( double )( ctx->files_n );
+}
+
+// END get info
+
+
 

@@ -104,7 +104,7 @@ static void die_if_fatal( struct cli_ctx *cli_ctx, int err ) {
 
 static void exit_kindly( struct cli_ctx *cli_ctx ) {
 	cli_ctx_free( cli_ctx );
-	puts( "Greeny is exiting without error." );
+	puts( "Greeny is exiting normally." );
 	exit( EXIT_SUCCESS );
 }
 
@@ -209,7 +209,7 @@ static void cat_transforms( struct cli_ctx *cli_ctx ) {
 
 	// add client-specific files
 #define X_CLIENT(x_machine, x_enum, x_human) if ( cli_ctx->x_machine ) { \
-	grn_cat_client( cli_ctx->transforms, x_enum, &in_err); \
+	grn_cat_client( cli_ctx->files, x_enum, &in_err); \
 	die_if(cli_ctx, in_err); \
 }
 #include "x_clients.h"
@@ -228,7 +228,7 @@ static void cat_files( struct cli_ctx *cli_ctx, int argind, int argc, char **arg
 	for ( ; argind < argc; argind++ ) {
 		printf( "Adding %s and subdirectories.\n", argv[argind] );
 		grn_cat_torrent_files( cli_ctx->files, argv[argind], NULL, &in_err );
-		if ( in_err == GRN_ERR_FS ) {
+		if ( grn_err_is_single_file( in_err ) ) {
 			printf( "Error adding %s -- file may not exist.", argv[optind] );
 			in_err = GRN_OK;
 		}
@@ -261,12 +261,28 @@ static void seal( struct cli_ctx *cli_ctx ) {
 
 static void main_loop( struct cli_ctx *cli_ctx ) {
 	int in_err;
+	int single_errors_count = 0;
 
 	// on this blessed day, all files and transforms are in place. Let's do the thing!
-	while ( !grn_one_file( cli_ctx->grn_ctx, &in_err ) ) {
-		puts( "Transforming a file..." );
+	while ( true ) {
+		char *next_file_path = grn_ctx_get_next_path( cli_ctx->grn_ctx );
+		if ( next_file_path != NULL ) {
+			printf( "Transforming file: %s\n", next_file_path );
+		}
+		if ( grn_one_file( cli_ctx->grn_ctx, &in_err ) ) {
+			break;
+		}
+		int single_file_err = grn_ctx_get_c_error( cli_ctx->grn_ctx );
+		if ( single_file_err ) {
+			single_errors_count++;
+			printf( "Single-file error: %s\n", grn_err_to_string( single_file_err ) );
+		}
 		die_if( cli_ctx, in_err );
 	}
 
-	puts( "Transformations complete without error. Thank greeny." );
+	if ( single_errors_count > 0 ) {
+		printf( "Transformations complete with %d errors.\n", single_errors_count );
+	} else {
+		puts( "Transformations complete without error. Thank greeny." );
+	}
 }
