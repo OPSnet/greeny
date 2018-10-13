@@ -24,6 +24,7 @@ endif
 binary_cli     := $(bin_dir)/greeny-cli$(binary_suffix)
 binary_gui     := $(bin_dir)/greeny$(binary_suffix)
 binary_test    := $(bin_dir)/greeny-test$(binary_suffix)
+binary_leak_t  := tests/test-leaks.sh
 
 ### IUP
 iup_dir        ?= vendor/iup
@@ -58,8 +59,9 @@ CFLAGS         := $(CFLAGS) -I$(iup_include) -Icontrib -Wall --std=c99
 
 all: $(binary_gui) $(binary_cli)
 
-test: $(binary_test)
+test: $(binary_test) $(binary_leak_t)
 	$(binary_test)
+	$(binary_leak_t)
 
 $(binary_gui) : $(objs_gui) $(iup_a)
 	$(CC) $(LDFLAGS) -o $(binary_gui) $(objs_gui) $(LIBS_gui)
@@ -94,10 +96,10 @@ download_iup: $(iup_zip_tmp)
 $(iup_zip_tmp) :
 	curl -Lo $(iup_zip_tmp) $(iup_zip_url)
 
-clean_greeny_only:
+clean:
 	rm -f $(obj_dir)/*.o $(binary_cli) $(binary_gui) $(binary_test)
 
-clean:
+clean_all:
 	$(MAKE) clean
 	rm -rf $(iup_dir) $(iup_zip_tmp)
 

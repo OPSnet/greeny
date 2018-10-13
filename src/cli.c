@@ -50,7 +50,6 @@ char version_text[] = "GREENY, the Graphical, Really Easy Editor for torreNts, Y
 char help_text[] = "USAGE:\n"
                    "\n"
                    "greeny [ OPTIONS ] [ -- ] input_file_1 input_file\n"
-                   "If no options are specified, --orpheus is assumed. This behavior may be removed in a later version.\n"
                    "\n"
                    "OPTIONS:\n"
                    "\n"
@@ -121,8 +120,10 @@ static void cli_ctx_alloc( struct cli_ctx *cli_ctx ) {
 }
 
 static void cli_ctx_free_cats( struct cli_ctx *cli_ctx ) {
-	grn_free( cli_ctx->files );
-	grn_free( cli_ctx->transforms );
+	vector_free( cli_ctx->files );
+	if (cli_ctx->transforms != NULL) {
+		grn_free_transforms_v(cli_ctx->transforms);
+	}
 	cli_ctx->files = NULL;
 	cli_ctx->transforms = NULL;
 }
@@ -255,7 +256,6 @@ static void seal( struct cli_ctx *cli_ctx ) {
 	grn_ctx_set_transforms_v( cli_ctx->grn_ctx, cli_ctx->transforms );
 	cli_ctx->files = NULL;
 	cli_ctx->transforms = NULL;
-
 	cli_ctx_free_cats( cli_ctx );
 }
 

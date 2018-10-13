@@ -190,7 +190,11 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	char *normalized_url = malloc( OPS_URL_LENGTH );
 	ERR( normalized_url == NULL, GRN_ERR_OOM );
 
-	ERR( !normalize_announce_url( user_announce, normalized_url ), GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX );
+	if ( !normalize_announce_url( user_announce, normalized_url ) ) {
+		free( normalized_url );
+		*out_err = GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX;
+		return;
+	}
 	GRN_LOG_DEBUG( "Normalized announce URL: %s", normalized_url );
 
 	// there's no fucking way this should be dynamically allocated, but it is.
@@ -307,11 +311,13 @@ void grn_free_transform( struct grn_transform *transform ) {
 }
 
 void grn_free_transforms_v( struct vector *vec ) {
+	assert( vec != NULL );
 	int transforms_n;
 	struct grn_transform *transforms = vector_export( vec, &transforms_n );
 	for ( int i = 0; i < transforms_n; i++ ) {
 		grn_free_transform( &transforms[i] );
 	}
+	free( transforms );
 }
 
 // END preset and semi-presets
@@ -405,10 +411,10 @@ void ben_str_swap( struct bencode *ben, char *replace_with ) {
 
 void mutate_string_subst( struct bencode *ben, struct grn_op_substitute payload, int *out_err ) {
 	*out_err = GRN_OK;
-	if( ben->type != BENCODE_STR ) {
+	if ( ben->type != BENCODE_STR ) {
 		return;
 	}
-	GRN_LOG_DEBUG("Substituting %s for %s", payload.find, payload.replace);
+	GRN_LOG_DEBUG( "Substituting %s for %s", payload.find, payload.replace );
 
 	char *substituted = strsubst( ben_str_val( ben ), payload.find, payload.replace, out_err );
 	ERR_FW();
@@ -417,7 +423,7 @@ void mutate_string_subst( struct bencode *ben, struct grn_op_substitute payload,
 
 void mutate_string_subst_regex( struct bencode *ben, struct grn_op_substitute_regex payload, int *out_err ) {
 	*out_err = GRN_OK;
-	if( ben->type != BENCODE_STR ) {
+	if ( ben->type != BENCODE_STR ) {
 		return;
 	}
 
@@ -477,10 +483,10 @@ void cat_descendants( struct vector *vec, struct bencode *ben, int *out_err ) {
 }
 
 // transforms a buffer based on a single transform and does not filter
-void transform_buffer_single( struct bencode *ben, struct grn_transform transform, int *out_err) {
+void transform_buffer_single( struct bencode *ben, struct grn_transform transform, int *out_err ) {
 	*out_err = GRN_OK;
 
-	GRN_LOG_DEBUG("Executing transform, %d", transform.operation);
+	GRN_LOG_DEBUG( "Executing transform, %d", transform.operation );
 	switch ( transform.operation ) {
 		case GRN_TRANSFORM_DELETE:
 			;
@@ -504,12 +510,12 @@ void transform_buffer_single( struct bencode *ben, struct grn_transform transfor
 			break;
 		case GRN_TRANSFORM_SUBSTITUTE:
 			;
-			mutate_string_subst(ben, transform.payload.substitute, out_err );
+			mutate_string_subst( ben, transform.payload.substitute, out_err );
 			ERR_FW();
 			break;
 		case GRN_TRANSFORM_SUBSTITUTE_REGEX:
 			;
-			mutate_string_subst_regex(ben, transform.payload.substitute_regex, out_err );
+			mutate_string_subst_regex( ben, transform.payload.substitute_regex, out_err );
 			ERR_FW();
 			break;
 		default:
@@ -557,7 +563,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 		char *filter_key;
 		int k = 0;
 		while ( ( filter_key = transform.key[k++] ) != NULL ) {
-			GRN_LOG_DEBUG("Filtering by key: '%s' ", filter_key);
+			GRN_LOG_DEBUG( "Filtering by key: '%s' ", filter_key );
 			// essentially, we want to make f_to_traverse empty and start traversing the former to_traverse
 			struct vector *f_tmp = f_traversing;
 			f_traversing = f_to_traverse;
@@ -565,23 +571,23 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 			vector_clear( f_to_traverse );
 
 			while ( vector_length( f_traversing ) > 0 ) {
-				struct bencode *traversing = * (struct bencode **) vector_pop( f_traversing );
+				struct bencode *traversing = * ( struct bencode ** ) vector_pop( f_traversing );
 
 				// wildcard
 				if ( filter_key[0] == '\0' ) {
-					GRN_LOG_DEBUG("Performing wildcard filter%s", "");
+					GRN_LOG_DEBUG( "Performing wildcard filter%s", "" );
 					cat_descendants( f_to_traverse, traversing, out_err );
 					if ( *out_err ) {
 						goto cleanup;
 					}
 				} else {
-					GRN_LOG_DEBUG("Non-wildcard filter%s", "");
+					GRN_LOG_DEBUG( "Non-wildcard filter%s", "" );
 					if ( traversing->type != BENCODE_DICT ) {
-						GRN_LOG_DEBUG("Skipping because not a dictionary%s", "");
+						GRN_LOG_DEBUG( "Skipping because not a dictionary%s", "" );
 						continue;
 					}
-					struct bencode *maybe_val = ben_dict_get_by_str(traversing, filter_key);
-					if (maybe_val != NULL) {
+					struct bencode *maybe_val = ben_dict_get_by_str( traversing, filter_key );
+					if ( maybe_val != NULL ) {
 						vector_push( f_to_traverse, &maybe_val, out_err );
 						if ( *out_err ) {
 							goto cleanup;
@@ -593,9 +599,9 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 		f_out = f_to_traverse;
 
 		while ( vector_length( f_out ) > 0 ) {
-			struct bencode *filtered = * (struct bencode **) vector_pop( f_out );
-			transform_buffer_single(filtered, transform, out_err);
-			if (*out_err) {
+			struct bencode *filtered = * ( struct bencode ** ) vector_pop( f_out );
+			transform_buffer_single( filtered, transform, out_err );
+			if ( *out_err ) {
 				goto cleanup;
 			}
 		}
