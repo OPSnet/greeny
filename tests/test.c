@@ -36,8 +36,20 @@ static void test_vector( void **state ) {
 
 	assert_int_equal( vec->allocated_n, 2 );
 	assert_int_equal( vec->used_n, 2 );
-	assert_int_equal( ( ( int * )vec->buffer )[1] , b );
+	assert_int_equal( vector_length( vec ), 2 );
+	assert_int_equal( * ( int * ) vector_get( vec, 1 ) , b );
+	assert_int_equal( * ( int * ) vector_get_last( vec ) , b );
+	assert_int_equal( * ( int * ) vector_pop( vec ) , b );
+	assert_int_equal( vector_length( vec ), 1 );
+	vector_clear( vec );
+	assert_int_equal( vector_length( vec ), 0 );
 
+	vec = vector_alloc( sizeof( int ), &in_err );
+	ASSERT_OK();
+	vector_push( vec, &a, &in_err );
+	ASSERT_OK();
+	vector_push( vec, &b, &in_err );
+	ASSERT_OK();
 	int export_length;
 	void *pre_export_buffer = vec->buffer;
 	void *export_buffer = vector_export( vec, &export_length );
@@ -119,6 +131,12 @@ static void test_transform_buffer( void **state ) {
 	char *key_presto[2];
 	key_presto[0] = "presto";
 	key_presto[1] = NULL;
+	char *key_deep[4];
+	key_deep[0] = "";
+	key_deep[1] = "listo";
+	key_deep[2] = "";
+	key_deep[3] = NULL;
+
 	struct grn_transform transform_set_presto = grn_mktransform_set_string( "presto", "largo" );
 	transform_set_presto.key = key_dummy;
 	struct grn_transform transform_del_presto = grn_mktransform_delete( "presto" );
@@ -131,12 +149,13 @@ static void test_transform_buffer( void **state ) {
 
 	struct grn_transform transform_del_inner_presto = transform_del_presto;
 	transform_del_inner_presto.key = key_presto;
+	struct grn_transform transform_sub_deep = transform_sub_presto;
+	transform_sub_deep.key = key_deep;
 
 	// test when they should work normally
 	_assert_transform_buffer_single( "de", transform_set_presto, "d6:presto5:largoe" );
 	_assert_transform_buffer_single( "d6:presto5:largoe", transform_del_presto, "de" );
 	_assert_transform_buffer_single( "5:largo", transform_sub_presto, "4:lapd" );
-	_assert_transform_buffer_single( "l5:largo10:overgottene", transform_sub_presto, "l4:lapd9:ovepdttene" );
 	_assert_transform_buffer_single( "10:imeltunity", transform_regex_presto, "8:immunity" );
 
 	// test no-ops
@@ -153,8 +172,27 @@ static void test_transform_buffer( void **state ) {
 	// the substitute transform is already setup, but substitute has some special stuff to test data types so that it works with arrays. So, it is better to use del here.
 	_assert_transform_buffer_single( "de", transform_del_inner_presto, "de" );
 
-	// TODO: test deep keys
-	// TODO: test deep substitute in lists
+	// test recursive keys
+	/**
+	 * {
+	 *     hello: {
+	 *         what: "cd",
+	 *         listo: [ "fargo", "retargo" ],
+	 *     },
+	 *     helloworld: "flip",
+	 *     world: {
+	 *         what: "cd",
+	 *         listo: [ "fargo", "retargo" ],
+	 *     },
+	 * }
+	 *
+	 * into ["fapd", "rotapd"]
+	 */
+	_assert_transform_buffer_single(
+	    "d5:hellod5:listol5:fargo7:retargoe4:what2:cde10:helloworld4:flip5:worldd5:listol5:fargo7:retargoe4:what2:cdee",
+	    transform_sub_deep,
+	    "d5:hellod5:listol4:fapd6:retapde4:what2:cde10:helloworld4:flip5:worldd5:listol4:fapd6:retapde4:what2:cdee"
+	);
 }
 
 bool is_string_passphrase( const char * );

@@ -403,23 +403,25 @@ void ben_str_swap( struct bencode *ben, char *replace_with ) {
 	benstr->len = strlen( replace_with );
 }
 
-// these two are mutators
-void mutate_string_subst( struct bencode *ben, void *state, int *out_err ) {
+void mutate_string_subst( struct bencode *ben, struct grn_op_substitute payload, int *out_err ) {
 	*out_err = GRN_OK;
-	assert( ben->type == BENCODE_STR );
+	if( ben->type != BENCODE_STR ) {
+		return;
+	}
+	GRN_LOG_DEBUG("Substituting %s for %s", payload.find, payload.replace);
 
-	struct grn_op_substitute *payload = ( struct grn_op_substitute * ) state;
-	char *substituted = strsubst( ben_str_val( ben ), payload->find, payload->replace, out_err );
+	char *substituted = strsubst( ben_str_val( ben ), payload.find, payload.replace, out_err );
 	ERR_FW();
 	ben_str_swap( ben, substituted );
 }
 
-void mutate_string_subst_regex( struct bencode *ben, void *state, int *out_err ) {
+void mutate_string_subst_regex( struct bencode *ben, struct grn_op_substitute_regex payload, int *out_err ) {
 	*out_err = GRN_OK;
-	assert( ben->type == BENCODE_STR );
+	if( ben->type != BENCODE_STR ) {
+		return;
+	}
 
-	struct grn_op_substitute_regex *payload = ( struct grn_op_substitute_regex * ) state;
-	char *substituted = regsubst( ben_str_val( ben ), &payload->find, payload->replace, out_err );
+	char *substituted = regsubst( ben_str_val( ben ), &payload.find, payload.replace, out_err );
 	ERR_FW();
 	ben_str_swap( ben, substituted );
 }
@@ -448,6 +450,75 @@ void ben_forall_strings( struct bencode *ben, void ( *mutator )( struct bencode 
 	}
 }
 
+void cat_descendants( struct vector *vec, struct bencode *ben, int *out_err ) {
+	*out_err = GRN_OK;
+
+	struct bencode *key, *val;
+	size_t pos;
+	switch ( ben->type ) {
+		case BENCODE_DICT:
+			;
+			ben_dict_for_each( key, val, pos, ben ) {
+				vector_push( vec, &val, out_err );
+				ERR_FW();
+			}
+			break;
+		case BENCODE_LIST:
+			;
+			ben_list_for_each( val, pos, ben ) {
+				vector_push( vec, &val, out_err );
+				ERR_FW();
+			}
+			break;
+		default:
+			;
+			break;
+	}
+}
+
+// transforms a buffer based on a single transform and does not filter
+void transform_buffer_single( struct bencode *ben, struct grn_transform transform, int *out_err) {
+	*out_err = GRN_OK;
+
+	GRN_LOG_DEBUG("Executing transform, %d", transform.operation);
+	switch ( transform.operation ) {
+		case GRN_TRANSFORM_DELETE:
+			;
+			// it returns a "standalone" pointer to the value, that must be freed. It modifies
+			// the main_dict in place
+			if ( ben->type != BENCODE_DICT ) {
+				break;
+			}
+			struct bencode *popped_val = ben_dict_pop_by_str( ben, transform.payload.delete_.key );
+			if ( popped_val != NULL ) {
+				ben_free( popped_val );
+			}
+			break;
+		case GRN_TRANSFORM_SET_STRING:
+			;
+			if ( ben->type != BENCODE_DICT ) {
+				break;
+			}
+			struct grn_op_set_string setstr_payload = transform.payload.set_string;
+			ERR( ben_dict_set_str_by_str( ben, setstr_payload.key, setstr_payload.val ), GRN_ERR_OOM );
+			break;
+		case GRN_TRANSFORM_SUBSTITUTE:
+			;
+			mutate_string_subst(ben, transform.payload.substitute, out_err );
+			ERR_FW();
+			break;
+		case GRN_TRANSFORM_SUBSTITUTE_REGEX:
+			;
+			mutate_string_subst_regex(ben, transform.payload.substitute_regex, out_err );
+			ERR_FW();
+			break;
+		default:
+			;
+			assert( false );
+			break;
+	}
+}
+
 void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
@@ -455,68 +526,78 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 
 	int bencode_error;
 	size_t off = 0;
+
+	// TODO: this
+#define ERR_FW_CLEANUP() if (*out_err) goto cleanup
+	struct vector *f_to_traverse = vector_alloc( sizeof( struct bencode * ), out_err );
+	ERR_FW_CLEANUP();
+	struct vector *f_traversing = vector_alloc( sizeof( struct bencode * ), out_err );
+	ERR_FW_CLEANUP();
+#undef ERR_FW_CLEANUP
+	struct vector *f_out;
+
 	struct bencode *main_dict = ben_decode2( ctx->buffer, ctx->buffer_n, &off, &bencode_error );
 	if ( bencode_error ) {
 		*out_err = bencode_error_to_anb( bencode_error );
-		if (main_dict != NULL) {
-			ben_free( main_dict );
-		}
-		return;
+		goto cleanup;
 	}
 
 	for ( int i = 0; i < ctx->transforms_n; i++ ) {
 		struct grn_transform transform = ctx->transforms[i];
+		assert( transform.key != NULL );
 
 		// first, filter down by the keys in the transform
-		struct bencode *filtered = main_dict;
-		assert( transform.key != NULL );
+		vector_clear( f_to_traverse );
+		vector_clear( f_traversing );
+		vector_push( f_to_traverse, &main_dict, out_err );
+		if ( *out_err ) {
+			goto cleanup;
+		}
+
 		char *filter_key;
 		int k = 0;
 		while ( ( filter_key = transform.key[k++] ) != NULL ) {
-			if ( filtered == NULL || filtered->type != BENCODE_DICT ) {
-				break;
-			}
-			filtered = ben_dict_get_by_str( filtered, filter_key );
-		}
-		if ( filtered == NULL ) {
-			continue;
-		}
+			GRN_LOG_DEBUG("Filtering by key: '%s' ", filter_key);
+			// essentially, we want to make f_to_traverse empty and start traversing the former to_traverse
+			struct vector *f_tmp = f_traversing;
+			f_traversing = f_to_traverse;
+			f_to_traverse = f_tmp;
+			vector_clear( f_to_traverse );
 
-		switch ( transform.operation ) {
-			case GRN_TRANSFORM_DELETE:
-				;
-				// it returns a "standalone" pointer to the value, that must be freed. It modifies
-				// the main_dict in place
-				if ( filtered->type != BENCODE_DICT ) {
-					break;
+			while ( vector_length( f_traversing ) > 0 ) {
+				struct bencode *traversing = * (struct bencode **) vector_pop( f_traversing );
+
+				// wildcard
+				if ( filter_key[0] == '\0' ) {
+					GRN_LOG_DEBUG("Performing wildcard filter%s", "");
+					cat_descendants( f_to_traverse, traversing, out_err );
+					if ( *out_err ) {
+						goto cleanup;
+					}
+				} else {
+					GRN_LOG_DEBUG("Non-wildcard filter%s", "");
+					if ( traversing->type != BENCODE_DICT ) {
+						GRN_LOG_DEBUG("Skipping because not a dictionary%s", "");
+						continue;
+					}
+					struct bencode *maybe_val = ben_dict_get_by_str(traversing, filter_key);
+					if (maybe_val != NULL) {
+						vector_push( f_to_traverse, &maybe_val, out_err );
+						if ( *out_err ) {
+							goto cleanup;
+						}
+					}
 				}
-				struct bencode *popped_val = ben_dict_pop_by_str( filtered, transform.payload.delete_.key );
-				if ( popped_val != NULL ) {
-					ben_free( popped_val );
-				}
-				break;
-			case GRN_TRANSFORM_SET_STRING:
-				;
-				if ( filtered->type != BENCODE_DICT ) {
-					break;
-				}
-				struct grn_op_set_string setstr_payload = transform.payload.set_string;
-				ERR( ben_dict_set_str_by_str( filtered, setstr_payload.key, setstr_payload.val ), GRN_ERR_OOM );
-				break;
-			case GRN_TRANSFORM_SUBSTITUTE:
-				;
-				ben_forall_strings( filtered, &mutate_string_subst, ( void * ) &transform.payload, out_err );
-				ERR_FW();
-				break;
-			case GRN_TRANSFORM_SUBSTITUTE_REGEX:
-				;
-				ben_forall_strings( filtered, &mutate_string_subst_regex, ( void * ) &transform.payload, out_err );
-				ERR_FW();
-				break;
-			default:
-				;
-				assert( false );
-				break;
+			}
+		}
+		f_out = f_to_traverse;
+
+		while ( vector_length( f_out ) > 0 ) {
+			struct bencode *filtered = * (struct bencode **) vector_pop( f_out );
+			transform_buffer_single(filtered, transform, out_err);
+			if (*out_err) {
+				goto cleanup;
+			}
 		}
 	}
 
@@ -526,7 +607,11 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	ERR( ctx->buffer == NULL, GRN_ERR_OOM );
 	goto cleanup;
 cleanup:
-	ben_free( main_dict );
+	if ( main_dict != NULL ) {
+		ben_free( main_dict );
+	}
+	vector_free( f_traversing );
+	vector_free( f_to_traverse );
 	return;
 }
 

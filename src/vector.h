@@ -9,10 +9,17 @@ struct vector {
 };
 
 struct vector *vector_alloc( int sz, int *out_err );
+// noop if null
 void vector_free( struct vector *free_me );
 // will copy push_me by value
 void vector_push( struct vector *vector, void *push_me, int *out_err );
 size_t vector_length( const struct vector *vector );
+void *vector_get( struct vector *vector, int i );
+void *vector_get_last( struct vector *vector );
+// the element returned is only valid until the vector is modified.
+void *vector_pop( struct vector *vector );
+// do not access previously popped or exported after this
+void vector_clear( struct vector *vector );
 /**
  * Convert a vector into a simple buffer. You still must free the vector later.
  * @param vector the vector to export

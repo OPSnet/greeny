@@ -26,10 +26,10 @@ struct vector *vector_alloc( int sz, int *out_err ) {
 }
 
 void vector_free( struct vector *free_me ) {
-	assert( free_me != NULL );
-	assert( free_me->buffer != NULL );
-	free( free_me->buffer );
-	free( free_me );
+	if ( free_me != NULL ) {
+		grn_free( free_me->buffer );
+		free( free_me );
+	}
 }
 
 void vector_push( struct vector *vector, void *push_me, int *out_err ) {
@@ -48,6 +48,28 @@ void vector_push( struct vector *vector, void *push_me, int *out_err ) {
 
 size_t vector_length( const struct vector *vector ) {
 	return vector->used_n;
+}
+
+void *vector_get( struct vector *vector, int i ) {
+	assert( i >= 0 );
+	assert( i < vector->used_n );
+	return vector->buffer + i * vector->sz;
+}
+
+void *vector_get_last( struct vector *vector ) {
+	assert( vector->used_n > 0 );
+	return vector_get( vector, vector_length( vector ) - 1 );
+}
+
+void *vector_pop( struct vector *vector ) {
+	assert( vector->used_n > 0 );
+	void *to_return = vector_get_last( vector );
+	vector->used_n--;
+	return to_return;
+}
+
+void vector_clear( struct vector *vector ) {
+	vector->used_n = 0;
 }
 
 void *vector_export( struct vector *vector, int *n ) {
