@@ -59,7 +59,7 @@ CFLAGS         := $(CFLAGS) -I$(iup_include) -Icontrib -Wall --std=c99
 
 all: $(binary_gui) $(binary_cli)
 
-test: $(binary_test) $(binary_leak_t)
+test: $(binary_test) $(binary_leak_t) $(binary_cli)
 	$(binary_test)
 	$(binary_leak_t)
 

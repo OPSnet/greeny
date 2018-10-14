@@ -402,7 +402,46 @@ bool str_ends_with( const char *haystack, const char *needle ) {
 	return strcmp( haystack_suffix, needle ) == 0;
 }
 
+
+// wrappers for ben functions that use our error idioms
+// putting `grn` at the end rather than the beginning denotes that it is not public, but still grn-specific
+
+void ben_free_grn( struct bencode *ben ) {
+	if ( ben != NULL ) {
+		ben_free( ben );
+	}
+}
+
+struct bencode *ben_decode_grn( const void *buffer, size_t buffer_n, int *out_err ) {
+	*out_err = GRN_OK;
+
+	int bencode_error;
+	size_t off = 0;
+	struct bencode *to_return = ben_decode2( buffer, buffer_n, &off, &bencode_error );
+	if ( bencode_error ) {
+		// TODO: rename anb
+		*out_err = bencode_error_to_anb( bencode_error );
+		ben_free_grn( to_return );
+		return NULL;
+	}
+
+	return to_return;
+}
+
+void *ben_encode_grn( struct bencode *ben, size_t *buffer_n, int *out_err ) {
+	void *to_return = ben_encode( buffer_n, ben );
+	ERR_NULL( to_return == NULL, GRN_ERR_OOM );
+	return to_return;
+}
+
+/**
+ * Replace a bencode string with a different one, in-place
+ * The previous string will be freed.
+ * @param ben the bencode string object to mutate
+ * @param replace_with the string to use as the new one. *must* be dynamically allocated.
+ */
 void ben_str_swap( struct bencode *ben, char *replace_with ) {
+	assert( ben->type == BENCODE_STR );
 	struct bencode_str *benstr = ( struct bencode_str * ) ben;
 	free( benstr->s );
 	benstr->s = replace_with;
@@ -430,30 +469,6 @@ void mutate_string_subst_regex( struct bencode *ben, struct grn_op_substitute_re
 	char *substituted = regsubst( ben_str_val( ben ), &payload.find, payload.replace, out_err );
 	ERR_FW();
 	ben_str_swap( ben, substituted );
-}
-
-/**
-* @brief Transforms a bencode by running a custom callback for each string, recursively
-*
-* @param ben The bencode to modify
-* @param mutator The custom callback
-* @param mutate_me A bencode string
-* @param state custom param
-*/
-void ben_forall_strings( struct bencode *ben, void ( *mutator )( struct bencode *mutate_me, void *state, int *out_err ), void *state, int *out_err ) {
-	*out_err = GRN_OK;
-
-	if ( ben->type == BENCODE_STR ) {
-		mutator( ben, state, out_err );
-		ERR_FW();
-	} else if ( ben->type == BENCODE_LIST ) {
-		int list_n = ben_list_len( ben );
-		for ( int i = 0; i < list_n; i++ ) {
-			struct bencode *list_cur = ben_list_get( ben, i );
-			ben_forall_strings( list_cur, mutator, state, out_err );
-			ERR_FW();
-		}
-	}
 }
 
 void cat_descendants( struct vector *vec, struct bencode *ben, int *out_err ) {
@@ -530,23 +545,15 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 
 	assert( ctx->state == GRN_CTX_TRANSFORM );
 
-	int bencode_error;
-	size_t off = 0;
-
 	// TODO: this
-#define ERR_FW_CLEANUP() if (*out_err) goto cleanup
 	struct vector *f_to_traverse = vector_alloc( sizeof( struct bencode * ), out_err );
 	ERR_FW_CLEANUP();
 	struct vector *f_traversing = vector_alloc( sizeof( struct bencode * ), out_err );
 	ERR_FW_CLEANUP();
-#undef ERR_FW_CLEANUP
 	struct vector *f_out;
 
-	struct bencode *main_dict = ben_decode2( ctx->buffer, ctx->buffer_n, &off, &bencode_error );
-	if ( bencode_error ) {
-		*out_err = bencode_error_to_anb( bencode_error );
-		goto cleanup;
-	}
+	struct bencode *main_dict = ben_decode_grn( ctx->buffer, ctx->buffer_n, out_err );
+	ERR_FW_CLEANUP();
 
 	for ( int i = 0; i < ctx->transforms_n; i++ ) {
 		struct grn_transform transform = ctx->transforms[i];
@@ -556,9 +563,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 		vector_clear( f_to_traverse );
 		vector_clear( f_traversing );
 		vector_push( f_to_traverse, &main_dict, out_err );
-		if ( *out_err ) {
-			goto cleanup;
-		}
+		ERR_FW_CLEANUP();
 
 		char *filter_key;
 		int k = 0;
@@ -577,9 +582,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 				if ( filter_key[0] == '\0' ) {
 					GRN_LOG_DEBUG( "Performing wildcard filter%s", "" );
 					cat_descendants( f_to_traverse, traversing, out_err );
-					if ( *out_err ) {
-						goto cleanup;
-					}
+					ERR_FW_CLEANUP();
 				} else {
 					GRN_LOG_DEBUG( "Non-wildcard filter%s", "" );
 					if ( traversing->type != BENCODE_DICT ) {
@@ -589,9 +592,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 					struct bencode *maybe_val = ben_dict_get_by_str( traversing, filter_key );
 					if ( maybe_val != NULL ) {
 						vector_push( f_to_traverse, &maybe_val, out_err );
-						if ( *out_err ) {
-							goto cleanup;
-						}
+						ERR_FW_CLEANUP();
 					}
 				}
 			}
@@ -608,9 +609,9 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	}
 
 	free( ctx->buffer );
-	ctx->buffer = ben_encode( &ctx->buffer_n, main_dict );
+	ctx->buffer = ben_encode_grn( main_dict, &ctx->buffer_n, out_err );
+	ERR_FW_CLEANUP();
 	GRN_LOG_DEBUG( "Newly encoded file size: %d", ( int )ctx->buffer_n );
-	ERR( ctx->buffer == NULL, GRN_ERR_OOM );
 	goto cleanup;
 cleanup:
 	if ( main_dict != NULL ) {

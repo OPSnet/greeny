@@ -110,6 +110,12 @@ static void grn_free( void *arg ) {
                               return retval; \
                           } while (0)
 
+#define ERR_FW_CLEANUP() do { \
+                            if (*out_err) { \
+                                goto cleanup; \
+                            } \
+                         } while (0)
+
 // GRN logging levels: 0 = none (default), 1 = error, 2 = warning, 3 = debug, 4 = debug plus
 #ifndef GRN_LOG_FILE
 #define GRN_LOG_FILE stderr
