@@ -434,6 +434,70 @@ void *ben_encode_grn( struct bencode *ben, size_t *buffer_n, int *out_err ) {
 	return to_return;
 }
 
+/*
+ * Converts {
+ *     "key": "{ something }",
+ * }
+ * into
+ * {
+ *     "key": { something },
+ * }
+ * one level only. If any of the values are not bencode, they are ignored.
+ *
+ * returns dynamically allocated, of course
+ */
+struct bencode *deluge_decode( void *buffer, size_t buffer_n, int *out_err ) {
+	*out_err = GRN_OK;
+
+	struct bencode *to_return = NULL,
+			                // this one will be freed on error, but not to_return
+			                *tmp_to_return = NULL,
+			                 // the decoded buffer, without fixes
+			                 *in_base_dict = NULL,
+			                  // the current child bencode parsed as a bencode
+			                  *out_cur_child = NULL,
+			                   *iter_key,
+			                   *iter_val;
+
+	in_base_dict = ben_decode_grn( buffer, buffer_n, out_err );
+	ERR_FW_CLEANUP();
+	if ( in_base_dict->type != BENCODE_DICT ) {
+		to_return = in_base_dict;
+		goto cleanup;
+	}
+
+	tmp_to_return = ben_dict();
+	if ( tmp_to_return == NULL ) {
+		*out_err = GRN_ERR_OOM;
+		goto cleanup;
+	}
+
+	size_t pos;
+	ben_dict_for_each( iter_key, iter_val, pos, in_base_dict ) {
+		if ( iter_val->type != BENCODE_STR ) {
+			continue;
+		}
+		// damn bencode tools has so many nice functions
+		out_cur_child = ben_decode_grn( ben_str_val( iter_val ), ben_str_len( iter_val ), out_err );
+		if ( *out_err == GRN_ERR_BENCODE_SYNTAX ) {
+			ben_free_grn( out_cur_child );
+			continue;
+		}
+
+		ben_dict_set( tmp_to_return, iter_key, out_cur_child );
+	}
+
+	to_return = tmp_to_return;
+	tmp_to_return = NULL;
+	goto cleanup;
+
+cleanup:
+	ben_free_grn( in_base_dict );
+	ben_free_grn( out_cur_child );
+	ben_free_grn( tmp_to_return );
+	return to_return;
+}
+
 /**
  * Replace a bencode string with a different one, in-place
  * The previous string will be freed.
@@ -803,7 +867,7 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
 /**
  * Here's how different torrent clients handle things:
  *   - Transmission: Uses the on-disk torrent for everything, fuckin' noice m88! The resume file does not store the tracker.
- *   - Deluge: Has a global fastresume file at ~/.config/deluge/torrents.fastresume in bencode format. The keys are info hashes, but, i fuck you not, the values are strings of bencode that must be parsed! In each of those sub-dictionaries, the "trackers" array contains the ~~good~~ bad shit.
+ *   - Deluge: Has a global fastresume file at ~/.config/deluge/torrents.fastresume in bencode format. The keys are info hashes, but, i fuck you not, the values are strings of bencode that must be parsed! In each of those sub-dictionaries, the "trackers" array contains the ~~good~~ bad shit. Actually, that's not what deluge uses at all! There's a "torrents.state" file which is what deluge *actually* uses. It's some super weird format.
  *   - qBittorrent: Has separate fastresume files in the same folder as the main torrent. The "trackers" key must be modified.
  *   - uTorrent is also bencode. Each key in the root dict is the name of a .torrent file. Inside is a "trackers" list.
  */
@@ -924,6 +988,7 @@ double grn_ctx_get_progress( struct grn_ctx *ctx ) {
 }
 
 // END get info
+
 
 
 

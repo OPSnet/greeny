@@ -278,6 +278,13 @@ static void test_cat_orpheus_transforms( void **state ) {
 	grn_free_transforms_v( my_vec );
 }
 
+static void test_deluge_decode( void **state ) {
+	( void ) state;
+	int in_err;
+
+	char deluge_encoded_shit[] = "";
+}
+
 int main( void ) {
 	const struct CMUnitTest tests[] = {
 		cmocka_unit_test( test_sanity ),
@@ -287,6 +294,7 @@ int main( void ) {
 		cmocka_unit_test( test_is_string_passphrase ),
 		cmocka_unit_test( test_normalize_orpheus_announce ),
 		cmocka_unit_test( test_cat_orpheus_transforms ),
+		cmocka_unit_test( test_deluge_decode ),
 	};
 
 	return cmocka_run_group_tests( tests, NULL, NULL );
