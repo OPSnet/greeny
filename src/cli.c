@@ -20,7 +20,7 @@ struct cli_ctx {
 #include "x_clients.h"
 #undef X_CLIENT
 
-	struct grn_ctx *grn_ctx;
+	struct grn_run_ctx *grn_ctx;
 };
 
 static void die_silent( struct cli_ctx *cli_ctx );
@@ -113,7 +113,7 @@ static void cli_ctx_alloc( struct cli_ctx *cli_ctx ) {
 	memset( cli_ctx, 0, sizeof( struct cli_ctx ) );
 	cli_ctx->files = vector_alloc( sizeof( char * ), &in_err );
 	die_if( cli_ctx, in_err );
-	cli_ctx->transforms = vector_alloc( sizeof( struct grn_transform ), &in_err );
+	cli_ctx->transforms = vector_alloc( sizeof( struct grn_bencode_transform ), &in_err );
 	die_if( cli_ctx, in_err );
 	cli_ctx->grn_ctx = grn_ctx_alloc( &in_err );
 	die_if( cli_ctx, in_err );
@@ -122,7 +122,7 @@ static void cli_ctx_alloc( struct cli_ctx *cli_ctx ) {
 static void cli_ctx_free_cats( struct cli_ctx *cli_ctx ) {
 	vector_free( cli_ctx->files );
 	if (cli_ctx->transforms != NULL) {
-		grn_free_transforms_v(cli_ctx->transforms);
+		grn_free_bencode_transforms_v(cli_ctx->transforms);
 	}
 	cli_ctx->files = NULL;
 	cli_ctx->transforms = NULL;

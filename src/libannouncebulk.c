@@ -16,45 +16,73 @@
 #include "vector.h"
 #include "err.h"
 
-// BEGIN context filesystem
+regex_t apollo_regex;
 
-void fread_ctx( struct grn_ctx *ctx, int *out_err ) {
-	*out_err = GRN_OK;
-	assert( ctx->state == GRN_CTX_READ );
-	assert( ctx->fh != NULL );
-
-	// we can't just do fread(buffer, 1, some_massive_num, fh) because we can't be sure whether
-	// the whole file was read or not.
-	ERR( fseek( ctx->fh, 0, SEEK_END ), GRN_ERR_FS_SEEK );
-	ctx->buffer_n = ftell( ctx->fh );
-	GRN_LOG_DEBUG( "File size: %d bytes", ( int )ctx->buffer_n );
-	ERR( fseek( ctx->fh, 0, SEEK_SET ), GRN_ERR_FS_SEEK );
-
-	ctx->buffer = malloc( ctx->buffer_n + 1 );
-	ERR( ctx->buffer == NULL, GRN_ERR_OOM );
-	if ( fread( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1 ) {
-		free( ctx->buffer );
-		ctx->buffer = NULL;
-		ERR( GRN_ERR_FS_READ );
+void grn_open( int *out_err ) {
+	if ( regcomp( &apollo_regex, "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", REG_EXTENDED ) ) {
+		// because our great regex obviously cannot be wrong
+		*out_err = GRN_ERR_OOM;
 	}
 }
 
-void fwrite_ctx( struct grn_ctx *ctx, int *out_err ) {
-	*out_err = GRN_OK;
-	assert( ctx->state == GRN_CTX_WRITE );
-	assert( ctx->fh != NULL );
-
-	ERR( fwrite( ctx->buffer, ctx->buffer_n, 1, ctx->fh ) != 1, GRN_ERR_FS_WRITE );
+void grn_close() {
+	regfree( &apollo_regex );
 }
 
-// END context filesystem
+char *strcpy_malloc( const char *src, int *out_err ) {
+	*out_err = GRN_OK;
+	assert( src != NULL );
+
+	char *to_return = malloc( strlen( src ) + 1 );
+	ERR_NULL( to_return == NULL, GRN_ERR_OOM );
+	strcpy( to_return, src );
+	return to_return;
+}
+
+// read an entire file
+void *fread_grn( FILE *fh, int *buffer_n, int *out_err ) {
+	*out_err = GRN_OK;
+	assert( fh != NULL );
+
+	// we can't just do fread(buffer, 1, some_massive_num, fh) because we can't be sure whether
+	// the whole file was read or not.
+	ERR( fseek( fh, 0, SEEK_END ), GRN_ERR_FS_SEEK );
+	*buffer_n = ftell( fh );
+	GRN_LOG_DEBUG( "File size: %d bytes", ( int )*buffer_n );
+	ERR( fseek( fh, 0, SEEK_SET ), GRN_ERR_FS_SEEK );
+
+	void *to_return = malloc( *buffer_n + 1 );
+	ERR_NULL( to_return == NULL, GRN_ERR_OOM );
+	if ( fread( to_return, *buffer_n, 1, fh ) != 1 ) {
+		free( to_return );
+		ERR_NULL( GRN_ERR_FS_READ );
+	}
+}
+
+void fwrite_grn( FILE *fh, void *buffer, int buffer_n, int *out_err ) {
+	*out_err = GRN_OK;
+	assert( fh != NULL );
+
+	ERR( fwrite( buffer, buffer_n, 1, fh ) != 1, GRN_ERR_FS_WRITE );
+}
+
+/**
+ * Truncates the file and opens in writing mode.
+ */
+FILE *freopen_w_grn( FILE *fh, int *out_err ) {
+	*out_err = GRN_OK;
+	// it will get fclosed by the caller with grn_ctx_free
+	FILE *reopened_fh = freopen( NULL, "w", fh );
+	ERR_NULL( reopened_fh == NULL, GRN_ERR_FS_OPEN );
+	return reopened_fh;
+}
 
 // BEGIN custom data type operations
 
-struct grn_ctx *grn_ctx_alloc( int *out_err ) {
+struct grn_run_ctx *grn_ctx_alloc( int *out_err ) {
 	*out_err = GRN_OK;
 
-	struct grn_ctx *ctx = calloc( 1, sizeof( struct grn_ctx ) );
+	struct grn_run_ctx *ctx = calloc( 1, sizeof( struct grn_run_ctx ) );
 	ERR_NULL( ctx == NULL, GRN_ERR_OOM );
 
 	ctx->state = GRN_CTX_NEXT;
@@ -62,7 +90,7 @@ struct grn_ctx *grn_ctx_alloc( int *out_err ) {
 	return ctx;
 }
 
-void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
+void grn_ctx_free( struct grn_run_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	if ( ctx->files != NULL ) {
@@ -77,7 +105,7 @@ void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
 
 	if ( ctx->transforms != NULL ) {
 		for ( int i = 0; i < ctx->transforms_n; i++ ) {
-			grn_free_transform( ctx->transforms + i );
+			grn_free_bencode_transform( ctx->transforms + i );
 		}
 		free( ctx->transforms );
 	}
@@ -92,22 +120,22 @@ void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
 }
 
 // maybe I should stop pretending C is object oriented? But the ctx is supposed to be opaque, right?
-void grn_ctx_set_files( struct grn_ctx *ctx, char **files, int files_n ) {
+void grn_ctx_set_files( struct grn_run_ctx *ctx, char **files, int files_n ) {
 	ctx->files = files;
 	ctx->files_n = files_n;
 }
 
-void grn_ctx_set_files_v( struct grn_ctx *ctx, struct vector *files ) {
+void grn_ctx_set_files_v( struct grn_run_ctx *ctx, struct vector *files ) {
 	ctx->files = ( char ** ) vector_export( files, &ctx->files_n );
 }
 
-void grn_ctx_set_transforms( struct grn_ctx *ctx, struct grn_transform *transforms, int transforms_n ) {
+void grn_ctx_set_transforms( struct grn_run_ctx *ctx, struct grn_bencode_transform *transforms, int transforms_n ) {
 	ctx->transforms = transforms;
 	ctx->transforms_n = transforms_n;
 }
 
-void grn_ctx_set_transforms_v( struct grn_ctx *ctx, struct vector *transforms ) {
-	ctx->transforms = ( struct grn_transform * ) vector_export( transforms, &ctx->transforms_n );
+void grn_ctx_set_transforms_v( struct grn_run_ctx *ctx, struct vector *transforms ) {
+	ctx->transforms = ( struct grn_bencode_transform * ) vector_export( transforms, &ctx->transforms_n );
 }
 
 int bencode_error_to_anb( int bencode_error ) {
@@ -130,8 +158,23 @@ char *announce_str_key[] = {
 	"announce",
 	NULL,
 };
+
 char *announce_list_key[] = {
 	"announce-list",
+	"",
+	NULL,
+};
+
+char *qbit_trackers_key[] = {
+	"trackers",
+	"",
+	NULL,
+};
+
+char *utorrent_trackers_key[] = {
+	"",
+	"trackers",
+	"",
 	NULL,
 };
 
@@ -183,139 +226,84 @@ bool normalize_announce_url( char *user_announce, char *our_announce ) {
 	return false;
 }
 
-// generic orpheus transform, i.e, user did not provide a passphrase
-void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *out_err ) {
+struct grn_utrans_announce_substitute_regex grn_mkutrans_substitute_regex( char *find_regstr, char *replace, int *out_err ) {
 	*out_err = GRN_OK;
 
+	struct grn_utrans_announce_substitute_regex to_return = {
+		.type = GRN_UTRANS_ANNOUNCE_SUBSTITUTE_REGEX,
+		.dynamalloc = GRN_DYNAMIC_TRANSFORM_REPLACE,
+	};
+
+	to_return.replace = strcpy_malloc( replace, out_err );
+	ERR_FW_CLEANUP();
+	int regcomp_res = regcomp( &to_return.payload.substitute_regex.find, find_regstr, REG_EXTENDED );
+	if ( regcomp_res == REG_ESPACE ) {
+		*out_err = GRN_ERR_OOM;
+		goto cleanup;
+	}
+	if ( regcomp_res ) {
+		*out_err = GRN_ERR_REGEX_SYNTAX;
+		goto cleanup;
+	}
+
+cleanup:
+	grn_free( to_return.replace );
+	to_return.replace = NULL;
+	return to_return;
+}
+
+// generic orpheus transform, i.e, user did not provide a passphrase
+struct grn_utrans_announce_substitute_regex grn_mkutrans_from_orpheus( char *user_announce, int *out_err ) {
+	*out_err = GRN_OK;
+
+	struct grn_utrans_announce_substitute_regex return_on_fail = { 0 };
+
 	char *normalized_url = malloc( OPS_URL_LENGTH );
-	ERR( normalized_url == NULL, GRN_ERR_OOM );
+	if ( normalized_url == NULL ) {
+		*out_err = GRN_ERR_OOM;
+		return return_on_fail;
+	}
 
 	if ( !normalize_announce_url( user_announce, normalized_url ) ) {
 		free( normalized_url );
 		*out_err = GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX;
-		return;
+		return return_on_fail;
 	}
 	GRN_LOG_DEBUG( "Normalized announce URL: %s", normalized_url );
 
-	// there's no fucking way this should be dynamically allocated, but it is.
-	struct grn_transform key_subst;
-	struct grn_transform list_subst;
+	struct grn_utrans_announce_substitute_regex to_return = grn_mkutrans_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
+	if ( *out_err ) {
 
-	key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
-	ERR_FW();
-	key_subst.dynamalloc = GRN_DYNAMIC_TRANSFORM_FIRST | GRN_DYNAMIC_TRANSFORM_SECOND;
-	list_subst = key_subst;
-	list_subst.dynamalloc = 0;
-
-	key_subst.key = announce_str_key;
-	list_subst.key = announce_list_key;
-
-	vector_push( vec, &key_subst, out_err );
-	ERR_FW();
-	vector_push( vec, &list_subst, out_err );
-	ERR_FW();
-}
-
-struct grn_transform grn_mktransform_set_string( char *key, char *val ) {
-	return ( struct grn_transform ) {
-		.operation = GRN_TRANSFORM_SET_STRING,
-		.payload = {
-			.set_string = {
-				.key = key,
-				.val = val,
-			},
-		},
-		.dynamalloc = 0,
-	};
-}
-
-struct grn_transform grn_mktransform_delete( char *key ) {
-	return ( struct grn_transform ) {
-		.operation = GRN_TRANSFORM_DELETE,
-		.payload = {
-			.set_string = {
-				.key = key,
-			},
-		},
-		.dynamalloc = 0,
-	};
-}
-
-struct grn_transform grn_mktransform_substitute( char *find, char *replace ) {
-	return ( struct grn_transform ) {
-		.operation = GRN_TRANSFORM_SUBSTITUTE,
-		.payload = {
-			.substitute = {
-				.find = find,
-				.replace = replace,
-			},
-		},
-		.dynamalloc = 0,
-	};
-}
-
-struct grn_transform grn_mktransform_substitute_regex( char *find_regstr, char *replace, int *out_err ) {
-	*out_err = GRN_OK;
-
-	struct grn_transform to_return = {
-		.operation = GRN_TRANSFORM_SUBSTITUTE_REGEX,
-		.payload = {
-			.substitute_regex = {
-				.replace = replace,
-			},
-		},
-		.dynamalloc = GRN_DYNAMIC_TRANSFORM_FIRST,
-	};
-
-	int regcomp_res = regcomp( &to_return.payload.substitute_regex.find, find_regstr, REG_EXTENDED );
-	if ( regcomp_res == REG_ESPACE ) {
-		*out_err = GRN_ERR_OOM;
-		return to_return;
 	}
-	if ( regcomp_res ) {
-		*out_err = GRN_ERR_REGEX_SYNTAX;
-		return to_return;
-	}
-
-	return to_return;
 }
 
 // this feels like such overkill for such a simple struct, but oh well
-void grn_free_transform( struct grn_transform *transform ) {
+void grn_free_utrans( struct grn_utrans *transform ) {
+	if ( transform == NULL ) {
+		return;
+	}
 	const int bits = transform->dynamalloc;
-	if ( bits & GRN_DYNAMIC_TRANSFORM_KEY_ELEMENTS ) {
-		for ( int i = 0; transform->key[i] != NULL; i++ ) {
-			free( transform->key[i] );
-		}
-	}
-	if ( bits & GRN_DYNAMIC_TRANSFORM_KEY ) {
-		free( transform->key );
-	}
-	if ( bits & GRN_DYNAMIC_TRANSFORM_FIRST ) {
-		if ( transform->operation == GRN_TRANSFORM_SUBSTITUTE_REGEX ) {
-			regfree( &transform->payload.substitute_regex.find );
+	if ( bits & GRN_DYNAMIC_TRANSFORM_FIND ) {
+		if ( transform->type == GRN_UTRANS_ANNOUNCE_SUBSTITUTE_REGEX ) {
+			regfree( &( ( struct grn_utrans_announce_substitute_regex * )transform )->find );
 		} else {
-			free( transform->payload.delete_.key );
+			grn_free( &( ( struct grn_utrans_announce_substitute * )transform )->find );
 		}
 	}
-	if ( bits & GRN_DYNAMIC_TRANSFORM_SECOND ) {
-		if ( transform->operation == GRN_TRANSFORM_SUBSTITUTE_REGEX ) {
-			free( transform->payload.substitute_regex.replace );
-		} else {
-			free( transform->payload.substitute.replace );
-		}
+	if ( bits & GRN_DYNAMIC_TRANSFORM_REPLACE ) {
+		grn_free( ( ( struct grn_utrans_announce_substitute * )transform )->replace );
 	}
 	if ( bits & GRN_DYNAMIC_TRANSFORM_SELF ) {
 		free( transform );
 	}
 }
 
-void grn_free_transforms_v( struct vector *vec ) {
+void grn_free_bencode_transforms_v( struct vector *vec ) {
 	assert( vec != NULL );
 	int transforms_n;
-	struct grn_transform *transforms = vector_export( vec, &transforms_n );
+	struct grn_bencode_transform *transforms = vector_export( vec, &transforms_n );
 	for ( int i = 0; i < transforms_n; i++ ) {
-		grn_free_transform( &transforms[i] );
+		grn_free_bencode_transform( &transforms[i] );
 	}
 	free( transforms );
 }
@@ -498,12 +486,12 @@ void cat_descendants( struct vector *vec, struct bencode *ben, int *out_err ) {
 }
 
 // transforms a buffer based on a single transform and does not filter
-void transform_buffer_single( struct bencode *ben, struct grn_transform transform, int *out_err ) {
+void transform_buffer_single( struct bencode *ben, struct grn_bencode_transform transform, int *out_err ) {
 	*out_err = GRN_OK;
 
 	GRN_LOG_DEBUG( "Executing transform, %d", transform.operation );
 	switch ( transform.operation ) {
-		case GRN_TRANSFORM_DELETE:
+		case GRN_BTRANS_DELETE:
 			;
 			// it returns a "standalone" pointer to the value, that must be freed. It modifies
 			// the main_dict in place
@@ -515,7 +503,7 @@ void transform_buffer_single( struct bencode *ben, struct grn_transform transfor
 				ben_free( popped_val );
 			}
 			break;
-		case GRN_TRANSFORM_SET_STRING:
+		case GRN_BTRANS_SET_STRING:
 			;
 			if ( ben->type != BENCODE_DICT ) {
 				break;
@@ -523,12 +511,12 @@ void transform_buffer_single( struct bencode *ben, struct grn_transform transfor
 			struct grn_op_set_string setstr_payload = transform.payload.set_string;
 			ERR( ben_dict_set_str_by_str( ben, setstr_payload.key, setstr_payload.val ), GRN_ERR_OOM );
 			break;
-		case GRN_TRANSFORM_SUBSTITUTE:
+		case GRN_BTRANS_SUBSTITUTE:
 			;
 			mutate_string_subst( ben, transform.payload.substitute, out_err );
 			ERR_FW();
 			break;
-		case GRN_TRANSFORM_SUBSTITUTE_REGEX:
+		case GRN_BTRANS_SUBSTITUTE_REGEX:
 			;
 			mutate_string_subst_regex( ben, transform.payload.substitute_regex, out_err );
 			ERR_FW();
@@ -540,7 +528,7 @@ void transform_buffer_single( struct bencode *ben, struct grn_transform transfor
 	}
 }
 
-void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
+void transform_buffer( struct grn_run_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	assert( ctx->state == GRN_CTX_TRANSFORM );
@@ -556,7 +544,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	ERR_FW_CLEANUP();
 
 	for ( int i = 0; i < ctx->transforms_n; i++ ) {
-		struct grn_transform transform = ctx->transforms[i];
+		struct grn_bencode_transform transform = ctx->transforms[i];
 		assert( transform.key != NULL );
 
 		// first, filter down by the keys in the transform
@@ -622,19 +610,9 @@ cleanup:
 	return;
 }
 
-/**
- * Truncates the file and opens in writing mode.
- */
-void freopen_ctx( struct grn_ctx *ctx, int *out_err ) {
-	*out_err = GRN_OK;
-	// it will get fclosed by the caller with grn_ctx_free
-	FILE *reopened_fh = freopen( NULL, "w", ctx->fh );
-	ERR( reopened_fh == NULL, GRN_ERR_FS_OPEN );
-	ctx->fh = reopened_fh;
-}
 
 // cleanup after a potentially failed single file then proceed to the next file
-void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
+void next_file_ctx( struct grn_run_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	GRN_LOG_DEBUG( "Next: file %d to %d", ctx->files_c, ctx->files_c + 1 );
@@ -665,7 +643,7 @@ void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
 
 // BEGIN mainish functions
 
-bool grn_one_step( struct grn_ctx *ctx, int *out_err ) {
+bool grn_one_step( struct grn_run_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 #define GRN_STEP_ERR() do { \
@@ -728,7 +706,7 @@ bool grn_one_step( struct grn_ctx *ctx, int *out_err ) {
 	return ctx->state == GRN_CTX_DONE;
 }
 
-bool grn_one_file( struct grn_ctx *ctx, int *out_err ) {
+bool grn_one_file( struct grn_run_ctx *ctx, int *out_err ) {
 	// essentially: Make sure we're starting right after a file, then run until we are about to start the next file
 	*out_err = GRN_OK;
 
@@ -746,7 +724,7 @@ bool grn_one_file( struct grn_ctx *ctx, int *out_err ) {
 	return ctx->state == GRN_CTX_DONE;
 }
 
-void grn_one_ctx( struct grn_ctx *ctx, int *out_err ) {
+void grn_one_ctx( struct grn_run_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
 	while ( ctx->state != GRN_CTX_DONE ) {
@@ -895,17 +873,17 @@ cleanup:
 
 // BEGIN get info
 
-bool grn_ctx_get_is_done( struct grn_ctx *ctx ) {
+bool grn_ctx_get_is_done( struct grn_run_ctx *ctx ) {
 	return ctx->state == GRN_CTX_DONE;
 }
 
-char *grn_ctx_get_c_path( struct grn_ctx *ctx ) {
+char *grn_ctx_get_c_path( struct grn_run_ctx *ctx ) {
 	assert( ctx->files_c >= 0 );
 	assert( ctx->files_c < ctx->files_n );
 	return ctx->files[ctx->files_c];
 }
 
-char *grn_ctx_get_next_path( struct grn_ctx *ctx ) {
+char *grn_ctx_get_next_path( struct grn_run_ctx *ctx ) {
 	if ( ctx->files_c + 1 < ctx->files_n ) {
 		return ctx->files[ctx->files_c + 1];
 	} else {
@@ -913,17 +891,103 @@ char *grn_ctx_get_next_path( struct grn_ctx *ctx ) {
 	}
 }
 
-int grn_ctx_get_c_error( struct grn_ctx *ctx ) {
+int grn_ctx_get_c_error( struct grn_run_ctx *ctx ) {
 	assert( ctx->files_c >= 0 );
 	return ctx->file_error;
 }
 
-double grn_ctx_get_progress( struct grn_ctx *ctx ) {
+double grn_ctx_get_progress( struct grn_run_ctx *ctx ) {
 	assert( ctx->files_c < ctx->files_n );
 	return ( double )( ctx->files_c + 1 ) / ( double )( ctx->files_n );
 }
 
 // END get info
+
+// the regex in the utrans' ownership is not reassigned, because it can't really be copied
+void grn_cat_utrans_announce_substitute_regex( struct vector *vec, const struct grn_utrans_announce_substitute_regex *utrans, int src_type, int *out_err ) {
+	*out_err = GRN_OK;
+
+	char *replace = NULL;
+	replace = strcpy_malloc( utrans->replace, out_err );
+	ERR_FW_CLEANUP();
+
+	regex_t find = utrans->find;
+
+	switch ( src_type ) {
+		case GRN_SRC_TORRENT:
+			vector_push( ( struct grn_bencode_transform ) {
+				.key = announce_str_key,
+				.payload = {
+					.substitute_regex = {
+						.find = find,
+						.replace = replace,
+					},
+				},
+				.dynamalloc = GRN_DYNAMIC_TRANSFORM_SECOND;
+			}, out_err );
+			ERR_FW_CLEANUP();
+			vector_push( ( struct grn_bencode_transform ) {
+				.key = announce_list_key,
+				.payload = {
+					.substitute_regex = {
+						.find = find,
+						.replace = replace,
+					},
+				},
+				.dynamalloc = 0,
+			}, out_err );
+			ERR_FW_CLEANUP();
+		case GRN_SRC_QBITTORRENT_FASTRESUME:
+			vector_push( ( struct grn_bencode_transform ) {
+				.key = qbit_trackers_key,
+				.payload = {
+					.substitute_regex = {
+						.find = find,
+						.replace = replace,
+					},
+				},
+				.dynamalloc = GRN_DYNAMIC_TRANSFORM_SECOND,
+			}, out_err );
+			ERR_FW_CLEANUP();
+		case GRN_SRC_UTORRENT_RESUME:
+			vector_push( ( struct grn_bencode_transform ) {
+				.key = utorrent_trackers_key,
+				.payload = {
+					.substitute_regex = {
+						.find = find,
+						.replace = replace,
+					},
+				},
+				.dynamalloc = GRN_DYNAMIC_TRANSFORM_SECOND,
+			}, out_err );
+			ERR_FW_CLEANUP();
+		default:
+			;
+			assert( false );
+			break;
+	}
+
+cleanup:
+	grn_free( replace );
+}
+
+void grn_cat_utrans_to_bencode_transforms( struct vector *vec, const struct grn_utrans *utrans, int src_type, int *out_err ) {
+	*out_err = GRN_OK;
+	assert( vec != NULL );
+
+	switch ( utrans->type ) {
+		case GRN_UTRANS_ANNOUNCE_SUBSTITUTE_REGEX:
+			;
+			grn_cat_utrans_announce_substitute_regex( vec, utrans, src_type, out_err );
+			ERR_FW();
+			break;
+		// TODO: announce substitute
+		default:
+			;
+			assert( false );
+			break;
+	}
+}
 
 
 
