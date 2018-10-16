@@ -19,17 +19,22 @@ static void exit_kindly();
 static void setup_main_dlg();
 static void setup_progress_dlg();
 static void setup_file_dlgs();
+static void setup_dlgs();
 
 static int cb_quit();
 static int cb_run();
 static int cb_select_file();
+#define X_CLIENT(var, enum, human) Ihandle *var##_checkbox; \
+	static int cb_##var(Ihandle *ih, int toggle_status) { \
+		return IUP_DEFAULT; \
+	}
+#include "x_clients.h"
+#undef X_CLIENT
 
 int main( int argc, char **argv ) {
 	IupOpen( &argc, &argv );
 
-	setup_progress_dlg();
-	setup_file_dlgs();
-	setup_main_dlg();
+	setup_dlgs();
 
 	IupMainLoop();
 
@@ -97,18 +102,39 @@ static void setup_main_dlg() {
 	////// FILE BUTTONS //////
 	add_file_button = IupButton( "Add File", NULL );
 	IupSetAttribute( add_file_button, "EXPAND", "HORIZONTAL" );
-	IupSetCallback( add_file_button, "ACTION", ( Icallback )cb_select_file );
+	IupSetCallback( add_file_button, "ACTION", &cb_select_file );
+
+	////// CLIENT CHECKBOXES //////
+#define X_CLIENT(var, enum, human) var##_checkbox = IupToggle(human, NULL); \
+	IupSetCallback(var##_checkbox, "ACTION", ( Icallback )cb_##var);
+#include "x_clients.h"
+#undef X_CLIENT
+
+	////// ORPHEUS TEXTBOX ///////
+	orpheus_field = IupText( NULL );
+	IupSetAttribute( orpheus_field, "CUEBANNER", "Orpheus passkey or announce URL" );
+	IupSetAttribute( orpheus_field, "EXPAND", "HORIZONTAL" );
 
 	main_vbox = IupVbox(
 	                add_file_button,
+#define X_CLIENT(var, enum, human) var##_checkbox,
+#include "x_clients.h"
+#undef X_CLIENT
+	                orpheus_field,
 	                run_buttons_hbox,
 	                0
 	            );
-	IupSetAttribute( main_vbox, "MARGIN", "10x10" );
+	IupSetAttribute( main_vbox, "MARGIN", "0x10" );
 	IupSetAttribute( main_vbox, "GAP", "5" );
 
 	main_dlg = IupDialog( main_vbox );
 	IupSetAttribute( main_dlg, "TITLE", "GREENY" );
 	IupShow( main_dlg );
+}
+
+static void setup_dlgs() {
+	setup_file_dlgs();
+	setup_progress_dlg();
+	setup_main_dlg();
 }
 
