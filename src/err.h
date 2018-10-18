@@ -20,6 +20,7 @@ enum {
 	GRN_ERR_REGEX_SYNTAX,
 	GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX,
 	GRN_ERR_UNKNOWN_CLI_OPT,
+	GRN_ERR_USER_CANCELLED,
 };
 
 static char *grn_err_to_string( int err ) {
@@ -39,6 +40,7 @@ static char *grn_err_to_string( int err ) {
 			X_ERR( GRN_ERR_REGEX_SYNTAX, "Invalid regex syntax" )
 			X_ERR( GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX, "Invalid Orpheus announce URL/passkey syntax" )
 			X_ERR( GRN_ERR_UNKNOWN_CLI_OPT, "Unrecognized CLI option" )
+			X_ERR( GRN_ERR_USER_CANCELLED, "Operation cancelled" );
 #undef X_ERR
 	};
 	assert( false );

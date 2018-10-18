@@ -96,6 +96,7 @@ struct grn_ctx {
 	int files_c; // index to the currently processing file
 	int files_n;
 	int file_error; // error during processing current file. Only recoverable errors.
+	int errs_n;
 	int state; // represents what to do next (sometimes this coincides with what is in progress)
 	FILE *fh;
 	char *buffer;
@@ -117,8 +118,10 @@ bool grn_ctx_get_is_done( struct grn_ctx *ctx );
 char *grn_ctx_get_c_path( struct grn_ctx *ctx );
 char *grn_ctx_get_next_path( struct grn_ctx *ctx );
 int grn_ctx_get_c_error( struct grn_ctx *ctx );
-// returns the progress as it would be after the current file is done processing.
-double grn_ctx_get_progress( struct grn_ctx *ctx );
+int grn_ctx_get_files_n( struct grn_ctx *ctx );
+// the number that have been completed
+int grn_ctx_get_files_c( struct grn_ctx *ctx );
+int grn_ctx_get_errs_n (struct grn_ctx *ctx);
 
 /**
  * Free a context

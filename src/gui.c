@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <assert.h>
 #include <iup.h>
 
 #include "libannouncebulk.h"
@@ -14,9 +15,8 @@ Ihandle *main_dlg = NULL,
          *file_list_frame, *file_list,
          *orpheus_field,
          *progress_dlg = NULL,
-          *file_dlg = NULL,
-           *dir_dlg = NULL
-                      ;
+          *dir_dlg = NULL
+                     ;
 
 struct vector *ui_files = NULL;
 struct grn_ctx *grn_run_ctx = NULL;
@@ -29,12 +29,16 @@ static void exit_badly();
 static void exit_if_err( int err );
 static void popup_err( int err );
 
+static void show_text_dlg( const char *title, const char *content );
 static void setup_main_dlg();
 static void setup_progress_dlg();
-static void setup_file_dlgs();
 static void setup_dlgs();
 
+static void summarize();
+static void progress_loop();
 static void add_file( const char *path );
+static void cat_files_to_runner();
+static void cat_transforms_to_runner( int *out_err );
 static void seal();
 
 static int cb_quit();
@@ -80,7 +84,7 @@ static void exit_with_code( int code ) {
 		IupDestroy( progress_dlg );
 	}
 	IupClose();
-	puts("Exiting properly.");
+	puts( "Exiting properly." );
 	exit( code );
 }
 
@@ -94,15 +98,13 @@ static void exit_badly() {
 
 static void exit_if_err( int err ) {
 	if ( err ) {
+		printf( "GREENY errror: %s.", grn_err_to_string( err ) );
 		exit_badly();
 	}
 }
 
 static void popup_err( int err ) {
-	Ihandle *popup_dlg = IupMessageDlg();
-	IupSetAttribute( popup_dlg, "TITLE", "Error" );
-	IupSetAttribute( popup_dlg, "VALUE", grn_err_to_string( err ) );
-	IupPopup( popup_dlg, IUP_CENTER, IUP_CENTER );
+	show_text_dlg( "Error", grn_err_to_string( err ) );
 }
 
 static int cb_quit() {
@@ -110,13 +112,23 @@ static int cb_quit() {
 }
 
 static int cb_run() {
-	seal();
-	IupPopup( progress_dlg, IUP_MOUSEPOS, IUP_MOUSEPOS );
-	return IUP_DEFAULT;
-}
+	int in_err;
 
-static int cb_select_file() {
-	IupPopup( file_dlg, IUP_MOUSEPOS, IUP_MOUSEPOS );
+	seal( &in_err );
+	if ( in_err ) {
+		popup_err( in_err );
+		return IUP_DEFAULT;
+	}
+	IupShowXY( progress_dlg, IUP_CENTERPARENT, IUP_CENTERPARENT );
+	progress_loop( &in_err );
+	if ( in_err ) {
+		// TODO: the IupLoopStep causes the main loop to exit if IUP_CLOSE is returned by anything (the cancel button), which isn't
+		// what the docs say and isn't desirable, either.
+		popup_err( in_err );
+		return IUP_DEFAULT;
+	}
+	IupHide( progress_dlg );
+	summarize();
 	return IUP_DEFAULT;
 }
 
@@ -148,7 +160,9 @@ static void cat_files_to_runner() {
 	exit_if_err( in_err );
 	for ( int i = 0; i < vector_length( ui_files ); i++ ) {
 		// TODO: fastresume and resume.dat
-		grn_cat_torrent_files( tmp_all_files, vector_get( ui_files, i ), NULL, &in_err );
+		char *this_ui_file = * ( char ** ) vector_get( ui_files, i );
+		GRN_LOG_DEBUG( "Sealing with UI file: '%s'", this_ui_file );
+		grn_cat_torrent_files( tmp_all_files, this_ui_file, NULL, &in_err );
 		if ( in_err ) {
 			goto cleanup_err;
 		}
@@ -167,7 +181,7 @@ static void cat_files_to_runner() {
 	return;
 cleanup_err:
 	vector_free_all( tmp_all_files );
-	exit_badly();
+	exit_if_err( in_err );
 }
 
 static void cat_transforms_to_runner( int *out_err ) {
@@ -193,32 +207,56 @@ static void cat_transforms_to_runner( int *out_err ) {
 	grn_ctx_set_transforms_v( grn_run_ctx, tmp_all_transforms );
 }
 
-static void seal() {
-	int in_err;
+static void seal( int *out_err ) {
+	*out_err = GRN_OK;
 
-	grn_ctx_free( grn_run_ctx, &in_err );
-	exit_if_err( in_err );
-	grn_run_ctx = grn_ctx_alloc( &in_err );
-	exit_if_err( in_err );
+	grn_ctx_free( grn_run_ctx, out_err );
+	ERR_FW();
+	grn_run_ctx = grn_ctx_alloc( out_err );
+	ERR_FW();
 	cat_files_to_runner();
-	cat_transforms_to_runner( &in_err );
-	if ( in_err ) {
-		popup_err( in_err );
-		// ctx will be freed on app exit if not sooner
-		return;
+	cat_transforms_to_runner( out_err );
+	ERR_FW();
+}
+
+static void progress_loop( int *out_err ) {
+	*out_err = GRN_OK;
+	int in_err;
+	assert( grn_run_ctx != NULL );
+
+	IupSetInt( progress_dlg, "TOTALCOUNT", grn_ctx_get_files_n( grn_run_ctx ) );
+	while ( ! grn_ctx_get_is_done( grn_run_ctx ) ) {
+		grn_one_file( grn_run_ctx, &in_err );
+		exit_if_err( in_err );
+		IupSetInt( progress_dlg, "COUNT", grn_ctx_get_files_c( grn_run_ctx ) );
+		if ( IupLoopStep() == IUP_CLOSE ) {
+			*out_err = GRN_ERR_USER_CANCELLED;
+			return;
+		}
 	}
 }
 
-static void setup_file_dlgs() {
-	file_dlg = IupFileDlg();
-	IupSetAttribute( file_dlg, "DIALOGTYPE", "OPEN" );
-	IupSetAttribute( file_dlg, "MULTIPLEFILES", "YES" );
-	IupSetAttribute( file_dlg, "FILTER", "*.torrent;*.fastresume;*.resume;resume.dat" );
-	IupSetAttribute( file_dlg, "FILTERINFO", "Torrent and fastresume files" );
+static void summarize() {
+	assert( grn_run_ctx != NULL );
+
+	char summary_text[512];
+	sprintf( summary_text, "Done.\n%d files transformed, %d had errors.", grn_ctx_get_files_n( grn_run_ctx ), grn_ctx_get_errs_n( grn_run_ctx ) );
+
+	show_text_dlg( "Transforms complete", summary_text );
+}
+
+static void show_text_dlg( const char *title, const char *content ) {
+	Ihandle *msg_dlg = IupMessageDlg();
+	IupSetAttribute( msg_dlg, "PARENTDIALOG", "main_dlg" );
+	IupSetAttribute( msg_dlg, "TITLE", title );
+	IupSetAttribute( msg_dlg, "VALUE", content );
+	IupPopup( msg_dlg, IUP_CENTERPARENT, IUP_CENTERPARENT );
+	IupDestroy( msg_dlg );
 }
 
 static void setup_progress_dlg() {
 	progress_dlg = IupProgressDlg();
+	IupSetAttribute( progress_dlg, "PARENTDIALOG", "main_dlg" );
 	IupSetAttribute( progress_dlg, "TITLE", "Greeny at work" );
 	IupSetAttribute( progress_dlg, "DESCRIPTION", "Transforming your torrents" );
 	IupSetCallback( progress_dlg, "CANCEL_CB", ( Icallback )cb_quit );
@@ -276,10 +314,11 @@ static void setup_main_dlg() {
 	                run_buttons_hbox,
 	                0
 	            );
-	IupSetAttribute( main_vbox, "MARGIN", "0x10" );
+	IupSetAttribute( main_vbox, "MARGIN", "10x10" );
 	IupSetAttribute( main_vbox, "GAP", "5" );
 
 	main_dlg = IupDialog( main_vbox );
+	IupSetHandle( "main_dlg", main_dlg );
 	IupSetAttribute( main_dlg, "MINSIZE", "300x350" );
 	IupSetAttribute( main_dlg, "SHRINK", "YES" );
 	IupSetAttribute( main_dlg, "TITLE", "GREENY" );
@@ -288,9 +327,8 @@ static void setup_main_dlg() {
 }
 
 static void setup_dlgs() {
-	setup_file_dlgs();
-	setup_progress_dlg();
 	setup_main_dlg();
+	setup_progress_dlg();
 }
 
 

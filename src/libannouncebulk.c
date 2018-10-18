@@ -66,7 +66,7 @@ struct grn_ctx *grn_ctx_alloc( int *out_err ) {
 void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
-	if (ctx == NULL) {
+	if ( ctx == NULL ) {
 		return;
 	}
 	if ( ctx->files != NULL ) {
@@ -697,6 +697,7 @@ bool grn_one_step( struct grn_ctx *ctx, int *out_err ) {
 	if ( *out_err ) { \
 		if ( grn_err_is_single_file ( *out_err ) ) { \
 			ctx->file_error = *out_err; \
+			ctx->errs_n++; \
 			ctx->state = GRN_CTX_NEXT; \
 			*out_err = GRN_OK; \
 		} \
@@ -943,9 +944,16 @@ int grn_ctx_get_c_error( struct grn_ctx *ctx ) {
 	return ctx->file_error;
 }
 
-double grn_ctx_get_progress( struct grn_ctx *ctx ) {
-	assert( ctx->files_c < ctx->files_n );
-	return ( double )( ctx->files_c + 1 ) / ( double )( ctx->files_n );
+int grn_ctx_get_files_c( struct grn_ctx *ctx ) {
+	return ctx->files_c + 1;
+}
+
+int grn_ctx_get_files_n( struct grn_ctx *ctx ) {
+	return ctx->files_n;
+}
+
+int grn_ctx_get_errs_n( struct grn_ctx *ctx ) {
+	return ctx->errs_n;
 }
 
 // END get info
