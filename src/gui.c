@@ -4,6 +4,7 @@
 #include "libannouncebulk.h"
 #include "vector.h"
 #include "util.h"
+#include "err.h"
 
 Ihandle *main_dlg = NULL,
          *main_vbox,
@@ -24,7 +25,9 @@ static void ui_open();
 
 static void exit_with_code( int code );
 static void exit_kindly();
+static void exit_badly();
 static void exit_if_err( int err );
+static void popup_err( int err );
 
 static void setup_main_dlg();
 static void setup_progress_dlg();
@@ -32,6 +35,7 @@ static void setup_file_dlgs();
 static void setup_dlgs();
 
 static void add_file( const char *path );
+static void seal();
 
 static int cb_quit();
 static int cb_run();
@@ -76,6 +80,7 @@ static void exit_with_code( int code ) {
 		IupDestroy( progress_dlg );
 	}
 	IupClose();
+	puts("Exiting properly.");
 	exit( code );
 }
 
@@ -83,10 +88,21 @@ static void exit_kindly() {
 	exit_with_code( EXIT_SUCCESS );
 }
 
+static void exit_badly() {
+	exit_with_code( EXIT_FAILURE );
+}
+
 static void exit_if_err( int err ) {
 	if ( err ) {
-		exit_with_code( EXIT_FAILURE );
+		exit_badly();
 	}
+}
+
+static void popup_err( int err ) {
+	Ihandle *popup_dlg = IupMessageDlg();
+	IupSetAttribute( popup_dlg, "TITLE", "Error" );
+	IupSetAttribute( popup_dlg, "VALUE", grn_err_to_string( err ) );
+	IupPopup( popup_dlg, IUP_CENTER, IUP_CENTER );
 }
 
 static int cb_quit() {
@@ -94,6 +110,7 @@ static int cb_quit() {
 }
 
 static int cb_run() {
+	seal();
 	IupPopup( progress_dlg, IUP_MOUSEPOS, IUP_MOUSEPOS );
 	return IUP_DEFAULT;
 }
@@ -122,6 +139,74 @@ static void add_file( const char *path ) {
 	IupAppend( file_list, label );
 	IupMap( label );
 	IupRefresh( label );
+}
+
+static void cat_files_to_runner() {
+	int in_err;
+
+	struct vector *tmp_all_files = vector_alloc( sizeof( char * ), &in_err );
+	exit_if_err( in_err );
+	for ( int i = 0; i < vector_length( ui_files ); i++ ) {
+		// TODO: fastresume and resume.dat
+		grn_cat_torrent_files( tmp_all_files, vector_get( ui_files, i ), NULL, &in_err );
+		if ( in_err ) {
+			goto cleanup_err;
+		}
+	}
+
+#define X_CLIENT(var, enum, human) if (var##_val) { \
+	grn_cat_client(tmp_all_files, enum, &in_err); \
+	if (in_err) { \
+		goto cleanup_err; \
+	} \
+}
+#include "x_clients.h"
+#undef X_CLIENT
+
+	grn_ctx_set_files_v( grn_run_ctx, tmp_all_files );
+	return;
+cleanup_err:
+	vector_free_all( tmp_all_files );
+	exit_badly();
+}
+
+static void cat_transforms_to_runner( int *out_err ) {
+	// we have a separate in_err because some errors cause a program exit, while some are forwarded
+	*out_err = GRN_OK;
+	int in_err;
+
+	char *orpheus_user_announce = IupGetAttribute( orpheus_field, "VALUE" );
+	struct vector *tmp_all_transforms = vector_alloc( sizeof( struct grn_transform ), &in_err );
+	exit_if_err( in_err );
+
+	grn_cat_transforms_orpheus( tmp_all_transforms, orpheus_user_announce, &in_err );
+	if ( in_err == GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX ) {
+		*out_err = in_err;
+		vector_free( tmp_all_transforms );
+		return;
+	}
+	if ( in_err ) {
+		vector_free( tmp_all_transforms );
+		exit_badly();
+	}
+
+	grn_ctx_set_transforms_v( grn_run_ctx, tmp_all_transforms );
+}
+
+static void seal() {
+	int in_err;
+
+	grn_ctx_free( grn_run_ctx, &in_err );
+	exit_if_err( in_err );
+	grn_run_ctx = grn_ctx_alloc( &in_err );
+	exit_if_err( in_err );
+	cat_files_to_runner();
+	cat_transforms_to_runner( &in_err );
+	if ( in_err ) {
+		popup_err( in_err );
+		// ctx will be freed on app exit if not sooner
+		return;
+	}
 }
 
 static void setup_file_dlgs() {
