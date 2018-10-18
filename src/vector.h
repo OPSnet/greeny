@@ -11,6 +11,8 @@ struct vector {
 struct vector *vector_alloc( int sz, int *out_err );
 // noop if null
 void vector_free( struct vector *free_me );
+// frees children. Only use if they are pointers!
+void vector_free_all( struct vector *free_me );
 // will copy push_me by value
 void vector_push( struct vector *vector, void *push_me, int *out_err );
 size_t vector_length( const struct vector *vector );

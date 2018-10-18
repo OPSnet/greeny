@@ -65,12 +65,6 @@ static bool grn_err_is_fatal( int err ) {
 	return err == GRN_ERR_OOM;
 }
 
-static void grn_free( void *arg ) {
-	if ( arg != NULL ) {
-		free( arg );
-	}
-}
-
 #define ERR1(error)                do { \
                                       *out_err = error; \
                                       return; \

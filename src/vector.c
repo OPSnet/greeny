@@ -3,6 +3,7 @@
 #include <assert.h>
 
 #include "vector.h"
+#include "util.h"
 #include "err.h"
 
 struct vector *vector_alloc( int sz, int *out_err ) {
@@ -30,6 +31,17 @@ void vector_free( struct vector *free_me ) {
 		grn_free( free_me->buffer );
 		free( free_me );
 	}
+}
+
+void vector_free_all( struct vector *free_me ) {
+	if ( free_me == NULL ) {
+		return;
+	}
+	assert( free_me->sz == sizeof( void * ) );
+	for ( int i = 0; i < vector_length( free_me ); i++ ) {
+		grn_free( vector_get( free_me, i ) );
+	}
+	free( free_me );
 }
 
 void vector_push( struct vector *vector, void *push_me, int *out_err ) {

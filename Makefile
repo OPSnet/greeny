@@ -12,7 +12,7 @@ bin_dir        := $(build_dir)/bin
 obj_dir        := $(build_dir)/obj
 
 ### SOURCE OBJECTS
-objs_common    := $(obj_dir)/bencode.o $(obj_dir)/libannouncebulk.o $(obj_dir)/vector.o
+objs_common    := $(obj_dir)/bencode.o $(obj_dir)/libannouncebulk.o $(obj_dir)/vector.o $(obj_dir)/util.o
 objs_cli       := $(objs_common) $(obj_dir)/cli.o
 objs_gui       := $(objs_common) $(obj_dir)/gui.o
 objs_test      := $(objs_common) $(obj_dir)/test.o
@@ -46,8 +46,8 @@ iup_extract_d  := vendor
 
 ### LIBS
 ifdef windows
-	LIBS_cli       := -l:libgnurx.dll.a
-	LIBS_gui       := $(iup_a) -lgdi32 -lcomdlg32 -lcomctl32 -luuid -loleaut32 -lole32
+	LIBS_cli       := -l:libregex.a
+	LIBS_gui       := $(iup_a) -l:libregex.a -lgdi32 -lcomdlg32 -lcomctl32 -luuid -loleaut32 -lole32
 else
 	LIBS_cli       := 
 	LIBS_gui       := $(iup_a) $(shell pkg-config --libs gtk+-3.0) -lX11 -lm

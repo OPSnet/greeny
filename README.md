@@ -11,7 +11,7 @@ Greeny is the Graphical, Really Easy Editor for torreNts, Yup!
 
 * MinGW Cross-compiler
 * MinGW Make
-* MinGW libgnurx with development headers (this is because MinGW does not ship with the POSIX regular expression libraries).
+* MinGW libgnurx, static edition, with development headers. WARNING: Some distros, like openSUSE, ship a version of libgnurx that has "static" .a files, but those files actually aren't really static and still will require runtime linkage! I recommend downloading the Fedora version of libgnurx-static from pkgs.org and dumping the included `libregex.a` file into the correct spot in your filesystem. On openSUSE, you can actually just install the RPM and ignore dependency problems, it will "just work".
 
 ## Getting IUP
 

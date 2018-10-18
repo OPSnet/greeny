@@ -14,6 +14,7 @@
 
 #include "libannouncebulk.h"
 #include "vector.h"
+#include "util.h"
 #include "err.h"
 
 // BEGIN context filesystem
@@ -65,6 +66,9 @@ struct grn_ctx *grn_ctx_alloc( int *out_err ) {
 void grn_ctx_free( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 
+	if (ctx == NULL) {
+		return;
+	}
 	if ( ctx->files != NULL ) {
 		for ( int i = 0; i < ctx->files_n; i++ ) {
 			if ( ctx->files[i] == NULL ) {
@@ -132,6 +136,18 @@ char *announce_str_key[] = {
 };
 char *announce_list_key[] = {
 	"announce-list",
+	"",
+	NULL,
+};
+char *utorrent_trackers_key[] = {
+	"",
+	"trackers",
+	"",
+	NULL,
+};
+char *qbittorrent_fastresume_trackers_key[] = {
+	"trackers",
+	"",
 	NULL,
 };
 
@@ -152,7 +168,7 @@ int is_string_passphrase( const char *str ) {
 * @brief Converts either an OPS announce URL or an OPS passphrase into a URL, or errors out
 *
 * @param user_announce The input from the user
-* @param our_announce A string of size OPS_URL_LENGTH plus null byte
+* @param our_announce A string of size OPS_URL_LENGTH plus null byte. Will be written to.
 * @return whether we were able to normalize or not. If false, bad user input.
 */
 bool normalize_announce_url( char *user_announce, char *our_announce ) {
@@ -198,21 +214,30 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	GRN_LOG_DEBUG( "Normalized announce URL: %s", normalized_url );
 
 	// there's no fucking way this should be dynamically allocated, but it is.
-	struct grn_transform key_subst;
-	struct grn_transform list_subst;
+	struct grn_transform key_subst, list_subst, ut_subst, qb_subst;
 
 	key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
 	ERR_FW();
 	key_subst.dynamalloc = GRN_DYNAMIC_TRANSFORM_FIRST | GRN_DYNAMIC_TRANSFORM_SECOND;
 	list_subst = key_subst;
 	list_subst.dynamalloc = 0;
+	ut_subst = key_subst;
+	ut_subst.dynamalloc = 0;
+	qb_subst = key_subst;
+	qb_subst.dynamalloc = 0;
 
 	key_subst.key = announce_str_key;
 	list_subst.key = announce_list_key;
+	ut_subst.key = utorrent_trackers_key;
+	qb_subst.key = qbittorrent_fastresume_trackers_key;
 
 	vector_push( vec, &key_subst, out_err );
 	ERR_FW();
 	vector_push( vec, &list_subst, out_err );
+	ERR_FW();
+	vector_push( vec, &ut_subst, out_err );
+	ERR_FW();
+	vector_push( vec, &qb_subst, out_err );
 	ERR_FW();
 }
 

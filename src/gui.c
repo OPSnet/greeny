@@ -1,31 +1,46 @@
 #include <stdlib.h>
 #include <iup.h>
 
+#include "libannouncebulk.h"
+#include "vector.h"
+#include "util.h"
+
 Ihandle *main_dlg = NULL,
          *main_vbox,
          *add_file_button, *add_dir_button,
          *run_button, *quit_button,
          *file_buttons_hbox, *run_buttons_hbox,
-         *file_list,
-         *orpheus_label, *orpheus_field,
+         *file_list_frame, *file_list,
+         *orpheus_field,
          *progress_dlg = NULL,
           *file_dlg = NULL,
            *dir_dlg = NULL
                       ;
 
+struct vector *ui_files = NULL;
+struct grn_ctx *grn_run_ctx = NULL;
+
+static void ui_open();
+
 static void exit_with_code( int code );
 static void exit_kindly();
+static void exit_if_err( int err );
 
 static void setup_main_dlg();
 static void setup_progress_dlg();
 static void setup_file_dlgs();
 static void setup_dlgs();
 
+static void add_file( const char *path );
+
 static int cb_quit();
 static int cb_run();
 static int cb_select_file();
+static int cb_drop_file( Ihandle *ih, const char *path );
 #define X_CLIENT(var, enum, human) Ihandle *var##_checkbox; \
+	bool var##_val; \
 	static int cb_##var(Ihandle *ih, int toggle_status) { \
+		var##_val = (bool) toggle_status; \
 		return IUP_DEFAULT; \
 	}
 #include "x_clients.h"
@@ -34,6 +49,7 @@ static int cb_select_file();
 int main( int argc, char **argv ) {
 	IupOpen( &argc, &argv );
 
+	ui_open();
 	setup_dlgs();
 
 	IupMainLoop();
@@ -41,7 +57,18 @@ int main( int argc, char **argv ) {
 	exit_kindly();
 }
 
+static void ui_open() {
+	int in_err;
+
+	ui_files = vector_alloc( sizeof( char * ), &in_err );
+	exit_if_err( in_err );
+}
+
 static void exit_with_code( int code ) {
+	int in_err;
+
+	vector_free( ui_files );
+	grn_ctx_free( grn_run_ctx, &in_err );
 	if ( main_dlg != NULL ) {
 		IupDestroy( main_dlg );
 	}
@@ -56,6 +83,12 @@ static void exit_kindly() {
 	exit_with_code( EXIT_SUCCESS );
 }
 
+static void exit_if_err( int err ) {
+	if ( err ) {
+		exit_with_code( EXIT_FAILURE );
+	}
+}
+
 static int cb_quit() {
 	return IUP_CLOSE;
 }
@@ -68,6 +101,27 @@ static int cb_run() {
 static int cb_select_file() {
 	IupPopup( file_dlg, IUP_MOUSEPOS, IUP_MOUSEPOS );
 	return IUP_DEFAULT;
+}
+
+static int cb_drop_file( Ihandle *ih, const char *path ) {
+	add_file( path );
+	return IUP_DEFAULT;
+}
+
+static void add_file( const char *path ) {
+	int in_err;
+
+	char *copied_path = grn_strcpy_malloc( path, &in_err );
+	// these things can only fail with OOM, so we're safe!
+	exit_if_err( in_err );
+	vector_push( ui_files, &copied_path, &in_err );
+	exit_if_err( in_err );
+
+	Ihandle *label = IupLabel( path );
+	IupSetAttribute( label, "PADDING", "10x0" );
+	IupAppend( file_list, label );
+	IupMap( label );
+	IupRefresh( label );
 }
 
 static void setup_file_dlgs() {
@@ -99,10 +153,18 @@ static void setup_main_dlg() {
 	IupSetAttribute( run_buttons_hbox, "ALIGNMENT", "ABOTTOM" );
 	IupSetAttribute( run_buttons_hbox, "GAP", "10" );
 
+	////// FILE LIST //////
+	file_list = IupVbox( NULL );
+	IupSetAttribute( file_list, "GAP", "5" );
+	file_list_frame = IupFrame( file_list );
+	IupSetAttribute( file_list_frame, "TITLE", "To transform" );
+
 	////// FILE BUTTONS //////
+	/*
 	add_file_button = IupButton( "Add File", NULL );
 	IupSetAttribute( add_file_button, "EXPAND", "HORIZONTAL" );
 	IupSetCallback( add_file_button, "ACTION", &cb_select_file );
+	*/
 
 	////// CLIENT CHECKBOXES //////
 #define X_CLIENT(var, enum, human) var##_checkbox = IupToggle(human, NULL); \
@@ -112,14 +174,19 @@ static void setup_main_dlg() {
 
 	////// ORPHEUS TEXTBOX ///////
 	orpheus_field = IupText( NULL );
-	IupSetAttribute( orpheus_field, "CUEBANNER", "Orpheus passkey or announce URL" );
+	IupSetAttribute( orpheus_field, "CUEBANNER", "abcdef0123456789abcdef0123456789" );
 	IupSetAttribute( orpheus_field, "EXPAND", "HORIZONTAL" );
 
 	main_vbox = IupVbox(
-	                add_file_button,
+	                IupLabel( "Drag files into Greeny (optional):" ),
+	                file_list_frame,
+//	                add_file_button,
+
+	                IupLabel( "Automatically transform all torrents for popular clients (optional):" ),
 #define X_CLIENT(var, enum, human) var##_checkbox,
 #include "x_clients.h"
 #undef X_CLIENT
+	                IupLabel( "Orpheus passphrase or announce URL:" ),
 	                orpheus_field,
 	                run_buttons_hbox,
 	                0
@@ -128,7 +195,10 @@ static void setup_main_dlg() {
 	IupSetAttribute( main_vbox, "GAP", "5" );
 
 	main_dlg = IupDialog( main_vbox );
+	IupSetAttribute( main_dlg, "MINSIZE", "300x350" );
+	IupSetAttribute( main_dlg, "SHRINK", "YES" );
 	IupSetAttribute( main_dlg, "TITLE", "GREENY" );
+	IupSetCallback( main_dlg, "DROPFILES_CB", ( Icallback ) cb_drop_file );
 	IupShow( main_dlg );
 }
 
@@ -137,4 +207,5 @@ static void setup_dlgs() {
 	setup_progress_dlg();
 	setup_main_dlg();
 }
+
 
