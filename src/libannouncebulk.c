@@ -148,6 +148,7 @@ char *utorrent_trackers_key[] = {
 char *qbittorrent_fastresume_trackers_key[] = {
 	"trackers",
 	"",
+	"",
 	NULL,
 };
 
@@ -826,6 +827,29 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
 	}
 }
 
+// helper function for use in grn_cat_client
+void cat_client_single_path( struct vector *vec, const char *home, const char *sub, const char *extension, int *out_err ) {
+	*out_err = GRN_OK;
+	assert(vec != NULL);
+	assert(home != NULL);
+	assert(sub != NULL);
+
+	char *full_path = malloc( strlen( home ) + strlen( sub ) + 1 );
+	ERR( full_path == NULL, GRN_ERR_OOM );
+	strcpy( full_path, home );
+	strcat( full_path, sub );
+
+	if (access( full_path, R_OK | X_OK ) ) {
+		*out_err = GRN_ERR_READ_CLIENT_PATH;
+		goto cleanup;
+	}
+	grn_cat_torrent_files( vec, full_path, extension, out_err );
+	ERR_FW_CLEANUP();
+	goto cleanup;
+cleanup:
+	grn_free(full_path);
+}
+
 /**
  * Here's how different torrent clients handle things:
  *   - Transmission: Uses the on-disk torrent for everything, fuckin' noice m88! The resume file does not store the tracker.
@@ -836,87 +860,71 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
 void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 	*out_err = GRN_OK;
 
-	char *state_path = NULL, *home_path, *full_path = NULL;
-	bool use_home = true;
-
 	// TODO: does this work in Windows? Should we get appdata instead?
-	home_path = getenv( "HOME" );
+	char *home_path = getenv( "HOME" );
 	ERR( home_path == NULL, GRN_ERR_NO_CLIENT_PATH );
 
 	switch ( client ) {
 		case GRN_CLIENT_QBITTORRENT:
 			;
 #if defined __unix__
-			state_path = "/.local/share/data/qBittorrent/BT_backup";
+			cat_client_single_path(vec, home_path, "/.local/share/data/qBittorrent/BT_backup", ".torrent", out_err);
+			ERR_FW();
+			cat_client_single_path(vec, home_path, "/.local/share/data/qBittorrent/BT_backup", ".fastresume", out_err);
+			ERR_FW();
 #elif defined __APPLE__
-			state_path = "/Library/Application Suppport/qBittorrent/BT_backup";
+			cat_client_single_path(vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".torrent", out_err);
+			ERR_FW();
+			cat_client_single_path(vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".fastresume", out_err);
+			ERR_FW();
 #elif defined _WIN32
-			state_path = "/AppData/Local/qBittorrent/BT_backup";
-#endif
-			break;
-		case GRN_CLIENT_DELUGE:
-			;
-#if defined __unix__ || defined __APPLE__
-			state_path = "/.config/deluge/state";
-#elif defined _WIN32
-			state_path = "";
+			cat_client_single_path(vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".torrent", out_err);
+			ERR_FW();
+			cat_client_single_path(vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".fastresume", out_err);
+			ERR_FW();
 #endif
 			break;
 		case GRN_CLIENT_TRANSMISSION:
 			;
 #if defined __unix__
-			state_path = "/.config/transmission/torrents";
+			cat_client_single_path(vec, home_path, "/.config/transmission/torrents", ".torrent", out_err);
+			ERR_FW();
 #elif defined __APPLE__
-			state_path = "/Library/Application Support/Transmission/torrents";
+			cat_client_single_path(vec, home_path, "/Library/Application Support/Transmission/torrents", ".torrent", out_err);
+			ERR_FW();
 #elif defined _WIN32
-			state_path = "/AppData/Local/transmission/torrents";
+			cat_client_single_path(vec, home_path, "/AppData/Local/transmission/torrents", ".torrent", out_err);
+			ERR_FW();
 #endif
 			break;
 		case GRN_CLIENT_TRANSMISSION_DAEMON:
 			;
 #if defined __unix__
-			state_path = "/.config/transmission-daemon/torrents";
+			cat_client_single_path(vec, home_path, "/.config/transmission-daemon/torrents", ".torrent", out_err);
+			ERR_FW();
 #elif defined __APPLE__
+			cat_client_single_path(vec, home_path, "/Library/Application Support/Transmission/torrents", ".torrent", out_err);
+			ERR_FW();
 			// TODO: check what the status is of transmission daemon on mac. Does it exist at all?
-			state_path = "/Library/Application Support/Transmission/torrents";
 #elif defined _WIN32
-			state_path = "/AppData/Local/transmission-daemon";
+			cat_client_single_path(vec, home_path, "/AppData/Local/transmission-daemon/torrents", ".torrent", out_err);
+			ERR_FW();
 #endif
 			break;
+#if defined _WIN32
+		case GRN_CLIENT_UTORRENT:
+			;
+			cat_client_single_path(vec, home_path, "/AppData/Roaming/uTorrent/", ".torrent", out_err);
+			ERR_FW();
+			cat_client_single_path(vec, home_path, "/AppData/Roaming/uTorrent/resume.dat", ".dat", out_err);
+			ERR_FW();
+			break;
+#endif
 		default:
 			assert( false );
 			return;
 			break;
 	}
-
-	// unsupported OS (windows with rtorrent) or something esotoric that does not define our variables
-	ERR( state_path == NULL, GRN_ERR_NO_CLIENT_PATH );
-
-	if ( use_home ) {
-		full_path = malloc( strlen( home_path ) + strlen( state_path ) + 1 );
-		ERR( full_path == NULL, GRN_ERR_OOM );
-		strcpy( full_path, home_path );
-		strcat( full_path, state_path );
-	} else {
-		full_path = state_path;
-	}
-
-	if ( access( full_path, R_OK | X_OK ) ) {
-		*out_err = GRN_ERR_READ_CLIENT_PATH;
-		goto cleanup;
-	}
-	grn_cat_torrent_files( vec, full_path, ".torrent", out_err );
-	if ( *out_err ) {
-		goto cleanup;
-	}
-	grn_cat_torrent_files( vec, full_path, ".fastresume", out_err );
-	if ( out_err ) {
-		goto cleanup;
-	}
-	// TODO: better errors for catting
-
-cleanup:
-	grn_free( full_path );
 }
 
 // BEGIN get info

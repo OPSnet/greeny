@@ -14,8 +14,7 @@ Ihandle *main_dlg = NULL,
          *file_buttons_hbox, *run_buttons_hbox,
          *file_list_frame, *file_list,
          *orpheus_field,
-         *progress_dlg = NULL,
-          *dir_dlg = NULL
+         *progress_dlg = NULL
                      ;
 
 struct vector *ui_files = NULL;
