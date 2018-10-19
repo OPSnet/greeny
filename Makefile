@@ -14,7 +14,11 @@ obj_dir        := $(build_dir)/obj
 ### SOURCE OBJECTS
 objs_common    := $(obj_dir)/bencode.o $(obj_dir)/libannouncebulk.o $(obj_dir)/vector.o $(obj_dir)/util.o
 objs_cli       := $(objs_common) $(obj_dir)/cli.o
-objs_gui       := $(objs_common) $(obj_dir)/gui.o
+ifdef windows
+	objs_gui       := $(objs_common) $(obj_dir)/gui.o $(obj_dir)/greeny.rc.o
+else
+	objs_gui       := $(objs_common) $(obj_dir)/gui.o
+endif
 objs_test      := $(objs_common) $(obj_dir)/test.o
 
 ### BINARIES
@@ -56,6 +60,10 @@ LIBS_test              := -lcmocka
 
 ### FLAGS
 CFLAGS         := $(CFLAGS) -I$(iup_include) -Icontrib -Wall --std=c99
+ifdef windows
+	# allow overriding to get console debug info
+	LDFLAGS_gui ?= -mwindows
+endif
 
 all: $(binary_gui) $(binary_cli)
 
@@ -64,13 +72,16 @@ test: $(binary_test) $(binary_leak_t) $(binary_cli)
 	$(binary_leak_t)
 
 $(binary_gui) : $(objs_gui) $(iup_a)
-	$(CC) $(LDFLAGS) -o $(binary_gui) $(objs_gui) $(LIBS_gui)
+	$(CC) $(LDFLAGS) $(LDFLAGS_gui) -o $(binary_gui) $(objs_gui) $(LIBS_gui)
 
 $(binary_cli) : $(objs_cli)
-	$(CC) $(LDFLAGS) -o $(binary_cli) $(objs_cli) $(LIBS_cli)
+	$(CC) $(LDFLAGS) $(LDFLAGS_cli) -o $(binary_cli) $(objs_cli) $(LIBS_cli)
 
 $(binary_test) : $(objs_test)
 	$(CC) $(LDFLAGS) -o $(binary_test) $(objs_test) $(LIBS_test)
+
+$(obj_dir)/%.rc.o : */%.rc
+	$(WINDRES) $< $@
 
 $(obj_dir)/%.o : */%.c
 	$(CC) $(CFLAGS) -c -o $@ $<

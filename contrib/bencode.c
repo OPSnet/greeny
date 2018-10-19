@@ -3,7 +3,11 @@
  *
  * Written by Heikki Orsila <heikki.orsila@iki.fi> and
  * Janne Kulmala <janne.t.kulmala@tut.fi> in 2011.
+ *
+ * Modifications made by the Orpheus developer team.
  */
+
+#define __USE_MINGW_ANSI_STDIO 1
 
 #include "bencode.h"
 

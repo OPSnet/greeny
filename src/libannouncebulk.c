@@ -125,11 +125,14 @@ int bencode_error_to_anb( int bencode_error ) {
 // BEGIN preset and semi-presets
 
 // some constants first
-const char OPS_PASSPHRASE_PREFIX[] = "https://opsfet.ch/";
+const char OPS_PASSPHRASE_PREFIX[] = "https://home.opsfet.ch/";
 const char OPS_PASSPHRASE_SUFFIX[] = "/announce";
 const int OPS_PASSPHRASE_LENGTH = 32;
-const int OPS_URL_LENGTH = 60;
+const int OPS_URL_LENGTH = 64;
 
+char *base_dict_key[] = {
+	NULL,
+};
 char *announce_str_key[] = {
 	"announce",
 	NULL,
@@ -204,7 +207,7 @@ bool normalize_announce_url( char *user_announce, char *our_announce ) {
 void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *out_err ) {
 	*out_err = GRN_OK;
 
-	char *normalized_url = malloc( OPS_URL_LENGTH );
+	char *normalized_url = malloc( OPS_URL_LENGTH + 1 );
 	ERR( normalized_url == NULL, GRN_ERR_OOM );
 
 	if ( !normalize_announce_url( user_announce, normalized_url ) ) {
@@ -215,7 +218,7 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	GRN_LOG_DEBUG( "Normalized announce URL: %s", normalized_url );
 
 	// there's no fucking way this should be dynamically allocated, but it is.
-	struct grn_transform key_subst, list_subst, ut_subst, qb_subst;
+	struct grn_transform key_subst, list_subst, ut_subst, qb_subst, ut_del;
 
 	key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
 	ERR_FW();
@@ -232,6 +235,10 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	ut_subst.key = utorrent_trackers_key;
 	qb_subst.key = qbittorrent_fastresume_trackers_key;
 
+	ut_del = grn_mktransform_delete( ".fileguard" );
+	ut_del.dynamalloc = 0;
+	ut_del.key = base_dict_key;
+
 	vector_push( vec, &key_subst, out_err );
 	ERR_FW();
 	vector_push( vec, &list_subst, out_err );
@@ -239,6 +246,8 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	vector_push( vec, &ut_subst, out_err );
 	ERR_FW();
 	vector_push( vec, &qb_subst, out_err );
+	ERR_FW();
+	vector_push( vec, &ut_del, out_err );
 	ERR_FW();
 }
 
@@ -568,15 +577,15 @@ void transform_buffer_single( struct bencode *ben, struct grn_transform transfor
 
 void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
-
 	assert( ctx->state == GRN_CTX_TRANSFORM );
 
+	struct vector *f_to_traverse = NULL, *f_traversing = NULL, *f_out;
+
 	// TODO: this
-	struct vector *f_to_traverse = vector_alloc( sizeof( struct bencode * ), out_err );
+	f_to_traverse = vector_alloc( sizeof( struct bencode * ), out_err );
 	ERR_FW_CLEANUP();
-	struct vector *f_traversing = vector_alloc( sizeof( struct bencode * ), out_err );
+	f_traversing = vector_alloc( sizeof( struct bencode * ), out_err );
 	ERR_FW_CLEANUP();
-	struct vector *f_out;
 
 	struct bencode *main_dict = ben_decode_grn( ctx->buffer, ctx->buffer_n, out_err );
 	ERR_FW_CLEANUP();
@@ -605,7 +614,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 				struct bencode *traversing = * ( struct bencode ** ) vector_pop( f_traversing );
 
 				// wildcard
-				if ( filter_key[0] == '\0' ) {
+				if ( strlen( filter_key ) == 0 ) {
 					GRN_LOG_DEBUG( "Performing wildcard filter%s", "" );
 					cat_descendants( f_to_traverse, traversing, out_err );
 					ERR_FW_CLEANUP();
@@ -654,7 +663,7 @@ cleanup:
 void freopen_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	// it will get fclosed by the caller with grn_ctx_free
-	FILE *reopened_fh = freopen( NULL, "w", ctx->fh );
+	FILE *reopened_fh = freopen( ctx->files[ctx->files_c], "wb", ctx->fh );
 	ERR( reopened_fh == NULL, GRN_ERR_FS_OPEN );
 	ctx->fh = reopened_fh;
 }
@@ -685,7 +694,7 @@ void next_file_ctx( struct grn_ctx *ctx, int *out_err ) {
 	}
 
 	// prepare the next file for reading
-	ERR( ( ctx->fh = fopen( ctx->files[ctx->files_c], "r" ) ) == NULL, GRN_ERR_FS_OPEN );
+	ERR( ( ctx->fh = fopen( ctx->files[ctx->files_c], "rb" ) ) == NULL, GRN_ERR_FS_OPEN );
 	ctx->state = GRN_CTX_READ;
 }
 
@@ -697,6 +706,7 @@ bool grn_one_step( struct grn_ctx *ctx, int *out_err ) {
 #define GRN_STEP_ERR() do { \
 	if ( *out_err ) { \
 		if ( grn_err_is_single_file ( *out_err ) ) { \
+			GRN_LOG_DEBUG("File error: %s.", grn_err_to_string( *out_err ) ); \
 			ctx->file_error = *out_err; \
 			ctx->errs_n++; \
 			ctx->state = GRN_CTX_NEXT; \
@@ -830,16 +840,16 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
 // helper function for use in grn_cat_client
 void cat_client_single_path( struct vector *vec, const char *home, const char *sub, const char *extension, int *out_err ) {
 	*out_err = GRN_OK;
-	assert(vec != NULL);
-	assert(home != NULL);
-	assert(sub != NULL);
+	assert( vec != NULL );
+	assert( home != NULL );
+	assert( sub != NULL );
 
 	char *full_path = malloc( strlen( home ) + strlen( sub ) + 1 );
 	ERR( full_path == NULL, GRN_ERR_OOM );
 	strcpy( full_path, home );
 	strcat( full_path, sub );
 
-	if (access( full_path, R_OK | X_OK ) ) {
+	if ( access( full_path, R_OK | X_OK ) ) {
 		*out_err = GRN_ERR_READ_CLIENT_PATH;
 		goto cleanup;
 	}
@@ -847,7 +857,7 @@ void cat_client_single_path( struct vector *vec, const char *home, const char *s
 	ERR_FW_CLEANUP();
 	goto cleanup;
 cleanup:
-	grn_free(full_path);
+	grn_free( full_path );
 }
 
 /**
@@ -860,63 +870,71 @@ cleanup:
 void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 	*out_err = GRN_OK;
 
-	// TODO: does this work in Windows? Should we get appdata instead?
+#ifdef _WIN32
+	char *home_path = getenv( "USERPROFILE" );
+	ERR( home_path == NULL, GRN_ERR_NO_CLIENT_PATH );
+	char *appdata_path = getenv( "APPDATA" );
+	ERR( appdata_path == NULL, GRN_ERR_NO_CLIENT_PATH );
+#else
 	char *home_path = getenv( "HOME" );
 	ERR( home_path == NULL, GRN_ERR_NO_CLIENT_PATH );
+#endif
 
 	switch ( client ) {
 		case GRN_CLIENT_QBITTORRENT:
 			;
 #if defined __unix__
-			cat_client_single_path(vec, home_path, "/.local/share/data/qBittorrent/BT_backup", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/.local/share/data/qBittorrent/BT_backup", ".torrent", out_err );
 			ERR_FW();
-			cat_client_single_path(vec, home_path, "/.local/share/data/qBittorrent/BT_backup", ".fastresume", out_err);
+			cat_client_single_path( vec, home_path, "/.local/share/data/qBittorrent/BT_backup", ".fastresume", out_err );
 			ERR_FW();
 #elif defined __APPLE__
-			cat_client_single_path(vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".torrent", out_err );
 			ERR_FW();
-			cat_client_single_path(vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".fastresume", out_err);
+			cat_client_single_path( vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".fastresume", out_err );
 			ERR_FW();
 #elif defined _WIN32
-			cat_client_single_path(vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".torrent", out_err );
 			ERR_FW();
-			cat_client_single_path(vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".fastresume", out_err);
+			cat_client_single_path( vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".fastresume", out_err );
 			ERR_FW();
 #endif
 			break;
 		case GRN_CLIENT_TRANSMISSION:
 			;
 #if defined __unix__
-			cat_client_single_path(vec, home_path, "/.config/transmission/torrents", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/.config/transmission/torrents", ".torrent", out_err );
 			ERR_FW();
 #elif defined __APPLE__
-			cat_client_single_path(vec, home_path, "/Library/Application Support/Transmission/torrents", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/Library/Application Support/Transmission/torrents", ".torrent", out_err );
 			ERR_FW();
 #elif defined _WIN32
-			cat_client_single_path(vec, home_path, "/AppData/Local/transmission/torrents", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/AppData/Local/transmission/torrents", ".torrent", out_err );
 			ERR_FW();
 #endif
 			break;
 		case GRN_CLIENT_TRANSMISSION_DAEMON:
 			;
 #if defined __unix__
-			cat_client_single_path(vec, home_path, "/.config/transmission-daemon/torrents", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/.config/transmission-daemon/torrents", ".torrent", out_err );
 			ERR_FW();
 #elif defined __APPLE__
-			cat_client_single_path(vec, home_path, "/Library/Application Support/Transmission/torrents", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/Library/Application Support/Transmission/torrents", ".torrent", out_err );
 			ERR_FW();
 			// TODO: check what the status is of transmission daemon on mac. Does it exist at all?
 #elif defined _WIN32
-			cat_client_single_path(vec, home_path, "/AppData/Local/transmission-daemon/torrents", ".torrent", out_err);
+			cat_client_single_path( vec, home_path, "/AppData/Local/transmission-daemon/torrents", ".torrent", out_err );
 			ERR_FW();
 #endif
 			break;
 #if defined _WIN32
 		case GRN_CLIENT_UTORRENT:
 			;
-			cat_client_single_path(vec, home_path, "/AppData/Roaming/uTorrent/", ".torrent", out_err);
+			/*
+			cat_client_single_path( vec, appdata_path, "/uTorrent", ".torrent", out_err );
 			ERR_FW();
-			cat_client_single_path(vec, home_path, "/AppData/Roaming/uTorrent/resume.dat", ".dat", out_err);
+			*/
+			cat_client_single_path( vec, appdata_path, "/uTorrent/resume.dat", ".dat", out_err );
 			ERR_FW();
 			break;
 #endif
@@ -965,6 +983,13 @@ int grn_ctx_get_errs_n( struct grn_ctx *ctx ) {
 }
 
 // END get info
+
+
+
+
+
+
+
 
 
 
