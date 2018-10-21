@@ -39,7 +39,7 @@ void vector_free_all( struct vector *free_me ) {
 	}
 	assert( free_me->sz == sizeof( void * ) );
 	for ( int i = 0; i < vector_length( free_me ); i++ ) {
-		grn_free( vector_get( free_me, i ) );
+		grn_free( *( void ** )vector_get( free_me, i ) );
 	}
 	free( free_me );
 }

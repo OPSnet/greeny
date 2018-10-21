@@ -18,6 +18,7 @@ grind
 grind --orpheus opseus
 grind --orpheus abcdef0123456789abcdef0123456789
 grind --orpheus abcdef0123456789abcdef0123456789 build
+grind --orpheus abcdef0123456789abcdef0123456789 tests/fixtures/torrents.state
 
 echo
 echo 'All tests passed.'

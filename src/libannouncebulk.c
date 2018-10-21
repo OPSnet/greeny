@@ -220,7 +220,7 @@ void grn_cat_transforms_orpheus( struct vector *vec, char *user_announce, int *o
 	// there's no fucking way this should be dynamically allocated, but it is.
 	struct grn_transform key_subst, list_subst, ut_subst, qb_subst, ut_del;
 
-	key_subst = grn_mktransform_substitute_regex( "^https?:\\/\\/(mars\\.)?(apollo|xanax)\\.rip(:2095)?\\/[a-f0-9]{32}\\/announce\\/?$", normalized_url, out_err );
+	key_subst = grn_mktransform_substitute_regex( "https?:\\/\\/?((mars|home)\\.)?(apollo\\.rip|xanax\\.rip|opsfet\\.ch)(:2095)?\\/[a-f0-9]{32}\\/announce/?", normalized_url, out_err );
 	ERR_FW();
 	key_subst.dynamalloc = GRN_DYNAMIC_TRANSFORM_FIRST | GRN_DYNAMIC_TRANSFORM_SECOND;
 	list_subst = key_subst;
@@ -407,22 +407,35 @@ char *strsubst( const char *haystack, const char *find, const char *replace, int
 	return to_return;
 }
 
-char *regsubst( const char *haystack, regex_t *find, const char *replace, int *out_err ) {
+// free the result. Will always return NULL on error.
+char *regsubst( const char *haystack_arg, regex_t *find, const char *replace, bool global, int *out_err ) {
 	*out_err = GRN_OK;
 	regmatch_t match[1];
-	char *to_return;
 
-	int regexec_res = regexec( find, haystack, 1, match, 0 );
-	// supposedly it can only fail in case of no match -- not OOM
-	if ( regexec_res ) {
-		to_return = malloc( strlen( haystack ) + 1 );
-		ERR_NULL( to_return == NULL, GRN_ERR_OOM );
-		strcpy( to_return, haystack );
-		return to_return;
-	}
-	to_return = strsubst_by_indices( haystack, replace, match->rm_so, match->rm_eo - match->rm_so, out_err );
-	ERR_FW_NULL();
-	return to_return;
+	char *haystack = malloc( strlen( haystack_arg ) + 1 );
+	ERR_NULL( haystack == NULL, GRN_ERR_OOM );
+	strcpy( haystack, haystack_arg );
+
+	// I'm stupidly proud of this little eo management shit
+	int last_eo = 0;
+	do {
+		int regexec_res = regexec( find, haystack + last_eo, 1, match, 0 );
+		// supposedly it can only fail in case of no match -- not OOM
+		if ( regexec_res ) {
+			break;
+		}
+		int abs_so = match->rm_so + last_eo;
+		int abs_eo = match->rm_eo + last_eo;
+		last_eo += match->rm_eo;
+		char *next_haystack = strsubst_by_indices( haystack, replace, abs_so, abs_eo - abs_so, out_err );
+		// this is a bit of a break from our normal error handling but it should be fine
+		free( haystack );
+		ERR_FW_NULL();
+
+		haystack = next_haystack;
+	} while ( global );
+
+	return haystack;
 }
 
 /**
@@ -501,7 +514,7 @@ void mutate_string_subst_regex( struct bencode *ben, struct grn_op_substitute_re
 		return;
 	}
 
-	char *substituted = regsubst( ben_str_val( ben ), &payload.find, payload.replace, out_err );
+	char *substituted = regsubst( ben_str_val( ben ), &payload.find, payload.replace, false, out_err );
 	ERR_FW();
 	ben_str_swap( ben, substituted );
 }
@@ -578,6 +591,29 @@ void transform_buffer_single( struct bencode *ben, struct grn_transform transfor
 void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	assert( ctx->state == GRN_CTX_TRANSFORM );
+
+	// BEGIN SHITTY DELUGE FUCKING SHIT THAT NEEDS TO BE LESIONED
+	if ( str_ends_with( grn_ctx_get_c_path( ctx ), "torrents.state" ) ) {
+		GRN_LOG_DEBUG( "Doing deluge .state transform%s", "" );
+		assert( ctx->transforms[0].operation = GRN_TRANSFORM_SUBSTITUTE_REGEX );
+
+		// we need to add the null byte so the file is a proper string
+		char *buffer_null = realloc( ctx->buffer, ctx->buffer_n + 1 );
+		// when realloc fails, the original pointer is still valid for free'ing
+		ERR( buffer_null == NULL, GRN_ERR_OOM );
+		ctx->buffer = NULL;
+		// it's unintuitive, but because it's zero indexed this is still actually one beyond the previous
+		// length
+		buffer_null[ctx->buffer_n] = '\0';
+
+		ctx->buffer = regsubst( buffer_null, &ctx->transforms[0].payload.substitute_regex.find, ctx->transforms[0].payload.substitute_regex.replace, true, out_err );
+		free( buffer_null );
+		ERR_FW();
+		// intentionally not adding the null byte because there shouldn't be one.
+		ctx->buffer_n = strlen( ctx->buffer );
+		return;
+	}
+	// END SHITTY DELUGE FUCKING SHIT THAT NEEDS TO BE LESIONED
 
 	struct vector *f_to_traverse = NULL, *f_traversing = NULL, *f_out;
 
@@ -663,9 +699,8 @@ cleanup:
 void freopen_ctx( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	// it will get fclosed by the caller with grn_ctx_free
-	FILE *reopened_fh = freopen( ctx->files[ctx->files_c], "wb", ctx->fh );
-	ERR( reopened_fh == NULL, GRN_ERR_FS_OPEN );
-	ctx->fh = reopened_fh;
+	ctx->fh = freopen( ctx->files[ctx->files_c], "wb", ctx->fh );
+	ERR( ctx->fh == NULL, GRN_ERR_FS_OPEN );
 }
 
 // cleanup after a potentially failed single file then proceed to the next file
@@ -849,7 +884,8 @@ void cat_client_single_path( struct vector *vec, const char *home, const char *s
 	strcpy( full_path, home );
 	strcat( full_path, sub );
 
-	if ( access( full_path, R_OK | X_OK ) ) {
+	// there was X_OK at one point for directory listings, but then single files like uTorrent and deluge torrents.state have issues
+	if ( access( full_path, R_OK ) ) {
 		*out_err = GRN_ERR_READ_CLIENT_PATH;
 		goto cleanup;
 	}
@@ -863,7 +899,7 @@ cleanup:
 /**
  * Here's how different torrent clients handle things:
  *   - Transmission: Uses the on-disk torrent for everything, fuckin' noice m88! The resume file does not store the tracker.
- *   - Deluge: Has a global fastresume file at ~/.config/deluge/torrents.fastresume in bencode format. The keys are info hashes, but, i fuck you not, the values are strings of bencode that must be parsed! In each of those sub-dictionaries, the "trackers" array contains the ~~good~~ bad shit.
+ *   - Deluge: Has a global file at ~/.config/deluge/torrents.state in some weird format, find/replace works. The individual torrents are in that same folder.
  *   - qBittorrent: Has separate fastresume files in the same folder as the main torrent. The "trackers" key must be modified.
  *   - uTorrent is also bencode. Each key in the root dict is the name of a .torrent file. Inside is a "trackers" list.
  */
@@ -897,6 +933,20 @@ void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 			cat_client_single_path( vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".torrent", out_err );
 			ERR_FW();
 			cat_client_single_path( vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".fastresume", out_err );
+			ERR_FW();
+#endif
+			break;
+		case GRN_CLIENT_DELUGE:
+			;
+#if defined __unix__ || defined __APPLE__
+			cat_client_single_path( vec, home_path, "/.config/deluge/state", ".torrent", out_err );
+			ERR_FW();
+			cat_client_single_path( vec, home_path, "/.config/deluge/state/torrents.state", ".state", out_err );
+			ERR_FW();
+#elif defined _WIN32
+			cat_client_single_path( vec, appdata_path, "/deluge/state", ".torrent", out_err );
+			ERR_FW();
+			cat_client_single_path( vec, appdata_path, "/deluge/state/torrents.state", ".state", out_err );
 			ERR_FW();
 #endif
 			break;
@@ -983,6 +1033,9 @@ int grn_ctx_get_errs_n( struct grn_ctx *ctx ) {
 }
 
 // END get info
+
+
+
 
 
 

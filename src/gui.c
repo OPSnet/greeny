@@ -15,7 +15,7 @@ Ihandle *main_dlg = NULL,
          *file_list_frame, *file_list,
          *orpheus_field,
          *progress_dlg = NULL
-                     ;
+                         ;
 
 struct vector *ui_files = NULL;
 struct grn_ctx *grn_run_ctx = NULL;
@@ -152,35 +152,30 @@ static void add_file( const char *path ) {
 	IupRefresh( label );
 }
 
-static void cat_files_to_runner() {
-	int in_err;
+static void cat_files_to_runner( int *out_err ) {
+	*out_err = GRN_OK;
 
-	struct vector *tmp_all_files = vector_alloc( sizeof( char * ), &in_err );
-	exit_if_err( in_err );
+	struct vector *tmp_all_files = vector_alloc( sizeof( char * ), out_err );
+	ERR_FW();
 	for ( int i = 0; i < vector_length( ui_files ); i++ ) {
 		// TODO: fastresume and resume.dat
 		char *this_ui_file = * ( char ** ) vector_get( ui_files, i );
 		GRN_LOG_DEBUG( "Sealing with UI file: '%s'", this_ui_file );
-		grn_cat_torrent_files( tmp_all_files, this_ui_file, NULL, &in_err );
-		if ( in_err ) {
-			goto cleanup_err;
-		}
+		grn_cat_torrent_files( tmp_all_files, this_ui_file, NULL, out_err );
+		ERR_FW_CLEANUP();
 	}
 
 #define X_CLIENT(var, enum, human) if (var##_val) { \
-	grn_cat_client(tmp_all_files, enum, &in_err); \
-	if (in_err) { \
-		goto cleanup_err; \
-	} \
+	grn_cat_client( tmp_all_files, enum, out_err ); \
+	ERR_FW_CLEANUP(); \
 }
 #include "x_clients.h"
 #undef X_CLIENT
 
 	grn_ctx_set_files_v( grn_run_ctx, tmp_all_files );
 	return;
-cleanup_err:
+cleanup:
 	vector_free_all( tmp_all_files );
-	exit_if_err( in_err );
 }
 
 static void cat_transforms_to_runner( int *out_err ) {
@@ -213,8 +208,9 @@ static void seal( int *out_err ) {
 	ERR_FW();
 	grn_run_ctx = grn_ctx_alloc( out_err );
 	ERR_FW();
-	cat_files_to_runner();
 	cat_transforms_to_runner( out_err );
+	ERR_FW();
+	cat_files_to_runner( out_err );
 	ERR_FW();
 }
 

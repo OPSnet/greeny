@@ -1,6 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <regex.h>
 
 #include <stdarg.h>
 #include <stddef.h>
@@ -107,12 +108,18 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err );
 void _assert_transform_buffer_single( const char *buffer, struct grn_transform transform, char *expected_buffer ) {
 	int in_err;
 
+	char *boop[] = {
+		"yap",
+	};
 	struct grn_ctx my_ctx = {
 		.state = GRN_CTX_TRANSFORM,
 		.buffer = malloc( 256 ),
 		.buffer_n = strlen( buffer ), // they don't need to know about that silly null byte
 		.transforms = &transform,
 		.transforms_n = 1,
+		.files_c = 0,
+		.files_n = 1,
+		.files = boop,
 	};
 	strcpy( my_ctx.buffer, buffer );
 	transform_buffer( &my_ctx, &in_err );
@@ -215,21 +222,21 @@ static void test_normalize_orpheus_announce( void **state ) {
 	char our_announce[OPS_URL_LENGTH + 1];
 
 	assert_int_equal( normalize_announce_url( "meow", our_announce ), false );
-	assert_int_equal( normalize_announce_url( "https://opsfet.ch/helloworld123testing/announce", our_announce ), false );
+	assert_int_equal( normalize_announce_url( "https://home.opsfet.ch/helloworld123testing/announce", our_announce ), false );
 	assert_int_equal( normalize_announce_url( "https://mars.apollo.rip/abcdef1234567890abcdef123456789/announce", our_announce ), false );
-	assert_int_equal( normalize_announce_url( "https://opsfet.ch/abcdef1234567890abcdef123456789", our_announce ), false );
+	assert_int_equal( normalize_announce_url( "https://home.opsfet.ch/abcdef1234567890abcdef123456789", our_announce ), false );
 
 	assert_int_equal(
-	    normalize_announce_url( "https://opsfet.ch/abcdef1234567890abcdef1234567890/announce", our_announce ),
+	    normalize_announce_url( "https://home.opsfet.ch/abcdef1234567890abcdef1234567890/announce", our_announce ),
 	    true
 	);
-	assert_string_equal( our_announce, "https://opsfet.ch/abcdef1234567890abcdef1234567890/announce" );
+	assert_string_equal( our_announce, "https://home.opsfet.ch/abcdef1234567890abcdef1234567890/announce" );
 
 	assert_int_equal(
 	    normalize_announce_url( "abcdef1234567890abcdef1234567890", our_announce ),
 	    true
 	);
-	assert_string_equal( our_announce, "https://opsfet.ch/abcdef1234567890abcdef1234567890/announce" );
+	assert_string_equal( our_announce, "https://home.opsfet.ch/abcdef1234567890abcdef1234567890/announce" );
 }
 
 #define RECAT_ORPHEUS_TRANSFORMS(ann) my_vec = vector_alloc(sizeof(struct grn_transform), &in_err); \
@@ -255,7 +262,7 @@ static void test_cat_orpheus_transforms( void **state ) {
 	_assert_transform_buffer_single(
 	    "d8:announce65:https://mars.apollo.rip/abcdef0123456789abcdef0123456789/announcee",
 	    * ( struct grn_transform * ) my_vec->buffer,
-	    "d8:announce59:https://opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
+	    "d8:announce64:https://home.opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
 	);
 	grn_free_transforms_v( my_vec );
 
@@ -264,7 +271,7 @@ static void test_cat_orpheus_transforms( void **state ) {
 	_assert_transform_buffer_single(
 	    "d8:announce60:https://xanax.rip/abcdef0123456789abcdef0123456789/announce/e",
 	    * ( struct grn_transform * ) my_vec->buffer,
-	    "d8:announce59:https://opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
+	    "d8:announce64:https://home.opsfet.ch/abcdef0123456789abcdef0123456789/announcee"
 	);
 	grn_free_transforms_v( my_vec );
 
@@ -278,6 +285,43 @@ static void test_cat_orpheus_transforms( void **state ) {
 	grn_free_transforms_v( my_vec );
 }
 
+char *regsubst( char *, regex_t *, char *, bool, int * );
+
+static void test_regsubst_all( void **state ) {
+	( void ) state;
+	int in_err;
+
+	regex_t yarr;
+	regcomp( &yarr, "yar*", 0 );
+
+	char *singular = regsubst( "i am the yarr of yarrs", &yarr, "afar", false, &in_err );
+	ASSERT_OK();
+	assert_string_equal( singular, "i am the afar of yarrs" );
+	free( singular );
+
+	char *not_a_pirate = regsubst( "Barr m8ies", &yarr, "rahrchrhr", true, &in_err );
+	ASSERT_OK();
+	assert_string_equal( not_a_pirate, "Barr m8ies" );
+	free( not_a_pirate );
+
+	char *a_pirate = regsubst( "yarr m8ies", &yarr, "afar", true, &in_err );
+	ASSERT_OK();
+	assert_string_equal( a_pirate, "afar m8ies" );
+	free( a_pirate );
+
+	char *many_pirates = regsubst( "yarr m99ies yaryar m8", &yarr, "afar", true, &in_err );
+	ASSERT_OK();
+	assert_string_equal( many_pirates, "afar m99ies afarafar m8" );
+	free( many_pirates );
+
+	char *weird_pirates = regsubst( "yayaryarrr", &yarr, "yarrr", true, &in_err );
+	ASSERT_OK();
+	assert_string_equal( weird_pirates, "yarrryarrryarrr" );
+	free( weird_pirates );
+
+	regfree( &yarr );
+}
+
 int main( void ) {
 	const struct CMUnitTest tests[] = {
 		cmocka_unit_test( test_sanity ),
@@ -287,6 +331,7 @@ int main( void ) {
 		cmocka_unit_test( test_is_string_passphrase ),
 		cmocka_unit_test( test_normalize_orpheus_announce ),
 		cmocka_unit_test( test_cat_orpheus_transforms ),
+		cmocka_unit_test( test_regsubst_all ),
 	};
 
 	return cmocka_run_group_tests( tests, NULL, NULL );
