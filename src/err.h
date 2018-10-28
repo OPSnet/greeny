@@ -14,6 +14,7 @@ enum {
 	GRN_ERR_FS_OPEN,
 	GRN_ERR_FS_CLOSE,
 	GRN_ERR_FS_NFTW,
+	GRN_ERR_ENOENT,
 	GRN_ERR_BENCODE_SYNTAX, // represents BEN errors 1, 2, 4. Ben error 0 is GRN_OK, 3 is GRN_ERR_OOM
 	GRN_ERR_NO_CLIENT_PATH, // unable to determine the path for a client
 	GRN_ERR_READ_CLIENT_PATH, // able to determine the path a client should have, but it did not exist
@@ -21,6 +22,7 @@ enum {
 	GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX,
 	GRN_ERR_UNKNOWN_CLI_OPT,
 	GRN_ERR_USER_CANCELLED,
+	GRN_ERR_NO_FILES,
 };
 
 static char *grn_err_to_string( int err ) {
@@ -34,6 +36,7 @@ static char *grn_err_to_string( int err ) {
 			X_ERR( GRN_ERR_FS_OPEN, "Filesystem error: open" )
 			X_ERR( GRN_ERR_FS_CLOSE, "Filesystem error: close" )
 			X_ERR( GRN_ERR_FS_NFTW, "Filesystem error: nftw/recursive search" )
+			X_ERR( GRN_ERR_ENOENT, "File/Directory not found" )
 			X_ERR( GRN_ERR_BENCODE_SYNTAX, "Invalid bencode syntax" )
 			X_ERR( GRN_ERR_NO_CLIENT_PATH, "Unable to determine torrent path for a client" )
 			X_ERR( GRN_ERR_READ_CLIENT_PATH, "A torrent path for a client was unreadable" )
@@ -41,6 +44,7 @@ static char *grn_err_to_string( int err ) {
 			X_ERR( GRN_ERR_ORPHEUS_ANNOUNCE_SYNTAX, "Invalid Orpheus announce URL/passkey syntax" )
 			X_ERR( GRN_ERR_UNKNOWN_CLI_OPT, "Unrecognized CLI option" )
 			X_ERR( GRN_ERR_USER_CANCELLED, "Operation cancelled" );
+			X_ERR( GRN_ERR_NO_FILES, "No files or clients selected" );
 #undef X_ERR
 	};
 	assert( false );
@@ -56,15 +60,8 @@ static bool grn_err_is_single_file( int err ) {
 	       err == GRN_ERR_FS_WRITE ||
 	       err == GRN_ERR_FS_OPEN ||
 	       err == GRN_ERR_FS_CLOSE ||
+	       err == GRN_ERR_ENOENT ||
 	       err == GRN_ERR_BENCODE_SYNTAX;
-}
-
-/**
- * Determines if an error is of such severity that the program should be immediately terminated
- * These can occur due to runtime conditions, hence no `assert`
- */
-static bool grn_err_is_fatal( int err ) {
-	return err == GRN_ERR_OOM;
 }
 
 #define ERR1(error)                do { \

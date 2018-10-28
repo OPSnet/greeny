@@ -9,6 +9,8 @@
 #include "libannouncebulk.h"
 #include "vector.h"
 #include "err.h"
+#include "util.h"
+#include "about.h"
 
 struct cli_ctx {
 	struct vector *transforms;
@@ -44,9 +46,6 @@ static void seal( struct cli_ctx *cli_ctx );
 
 static void main_loop( struct cli_ctx *cli_ctx );
 
-char version_text[] = "GREENY, the Graphical, Really Easy Editor for torreNts, Yup!\n"
-                      "You are using the GREENY command line interface, version PRE_ALPHA\n"
-                      "This software's copyright is assigned to the public domain.\n";
 char help_text[] = "USAGE:\n"
                    "\n"
                    "greeny [ OPTIONS ] [ -- ] input_file_1 input_file\n"
@@ -121,8 +120,8 @@ static void cli_ctx_alloc( struct cli_ctx *cli_ctx ) {
 
 static void cli_ctx_free_cats( struct cli_ctx *cli_ctx ) {
 	vector_free( cli_ctx->files );
-	if (cli_ctx->transforms != NULL) {
-		grn_free_transforms_v(cli_ctx->transforms);
+	if ( cli_ctx->transforms != NULL ) {
+		grn_free_transforms_v( cli_ctx->transforms );
 	}
 	cli_ctx->files = NULL;
 	cli_ctx->transforms = NULL;
@@ -149,6 +148,12 @@ static void handle_opts( struct cli_ctx *cli_ctx, int *argind, int argc, char **
 			.has_arg = 0,
 			.flag = NULL,
 			.val = 'h',
+		},
+		{
+			.name = "version",
+			.has_arg = 0,
+			.flag = NULL,
+			.val = 'v',
 		},
 		{
 			.name = "orpheus",
@@ -195,7 +200,7 @@ static void handle_opts( struct cli_ctx *cli_ctx, int *argind, int argc, char **
 				break;
 			case 'v':
 				;
-				puts( version_text );
+				puts( GRN_ABOUT_TEXT );
 				exit_kindly( cli_ctx );
 				break;
 				// other might mean 0, for a long opt. No need to handle it.
@@ -230,7 +235,7 @@ static void cat_files( struct cli_ctx *cli_ctx, int argind, int argc, char **arg
 		printf( "Adding %s and subdirectories.\n", argv[argind] );
 		grn_cat_torrent_files( cli_ctx->files, argv[argind], NULL, &in_err );
 		if ( grn_err_is_single_file( in_err ) ) {
-			printf( "Error adding %s -- file may not exist.", argv[optind] );
+			printf( "Error adding %s -- %s.\n", argv[argind], grn_err_to_string( in_err ) );
 			in_err = GRN_OK;
 		}
 		die_if( cli_ctx, in_err );
@@ -261,28 +266,19 @@ static void seal( struct cli_ctx *cli_ctx ) {
 
 static void main_loop( struct cli_ctx *cli_ctx ) {
 	int in_err;
-	int single_errors_count = 0;
 
 	// on this blessed day, all files and transforms are in place. Let's do the thing!
 	while ( true ) {
 		char *next_file_path = grn_ctx_get_next_path( cli_ctx->grn_ctx );
-		if ( next_file_path != NULL ) {
-			printf( "Transforming file: %s\n", next_file_path );
-		}
 		if ( grn_one_file( cli_ctx->grn_ctx, &in_err ) ) {
 			break;
 		}
 		int single_file_err = grn_ctx_get_c_error( cli_ctx->grn_ctx );
 		if ( single_file_err ) {
-			single_errors_count++;
-			printf( "Single-file error: %s\n", grn_err_to_string( single_file_err ) );
+			printf( "%s for %s\n", grn_err_to_string( single_file_err ), next_file_path );
 		}
 		die_if( cli_ctx, in_err );
 	}
 
-	if ( single_errors_count > 0 ) {
-		printf( "Transformations complete with %d errors.\n", single_errors_count );
-	} else {
-		puts( "Transformations complete without error. Thank greeny." );
-	}
+	printf( "Transformed %d files, %d of which had errors.\n", grn_ctx_get_files_n( cli_ctx->grn_ctx ), grn_ctx_get_errs_n( cli_ctx->grn_ctx ) );
 }

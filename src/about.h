@@ -1,0 +1,9 @@
+#ifndef H_ABOUT
+#define H_ABOUT
+
+#define GRN_VERSION "orpheus-rc1"
+#define GRN_ABOUT_TEXT "Greeny version " GRN_VERSION "\n" \
+	"Copyleft (?) 2018 the Orpheus developers.\n" \
+	"See https://orpheus.network/ and https://github.com/OPSNet/greeny"
+
+#endif

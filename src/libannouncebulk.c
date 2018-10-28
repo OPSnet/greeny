@@ -9,6 +9,7 @@
 #include <ftw.h>
 #include <ctype.h>
 #include <regex.h>
+#include <errno.h>
 
 #include <bencode.h>
 
@@ -843,7 +844,9 @@ int cat_nftw_cb( const char *path, const struct stat *st, int file_type, struct 
 	// ignore non-files and files without the correct extension
 	if (
 	    file_type != FTW_F ||
-	    !str_ends_with( path, cat_ext )
+	    !str_ends_with( path, cat_ext ) ||
+	    // not a perfect way to determine if the file is readable (it only checks the owner), but better performance than access
+	    !( st->st_mode & S_IRUSR )
 	) {
 		return 0;
 	}
@@ -865,10 +868,20 @@ void grn_cat_torrent_files( struct vector *vec, const char *path, const char *ex
 	cat_ext = extension != NULL ? extension : ".torrent";
 
 	int nftw_err = nftw( path, cat_nftw_cb, 16, 0 );
+	if ( nftw_err == -1 ) {
+		if (
+		    errno == EACCES ||
+		    errno == ENOENT ||
+		    errno == ENOTDIR
+		) {
+			ERR( GRN_ERR_ENOENT );
+		} else {
+			ERR( GRN_ERR_FS_NFTW );
+		}
+	}
+	// error returned by callback
 	if ( nftw_err ) {
-		// if nftw returns -1, it means there was some internal problem. Any other error means that our cb failed.
-		*out_err = nftw_err == -1 ? GRN_ERR_FS_NFTW : nftw_err;
-		return;
+		ERR( nftw_err );
 	}
 }
 

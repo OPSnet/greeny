@@ -1,4 +1,5 @@
 #include <stdlib.h>
+#include <string.h>
 #include <assert.h>
 #include <iup.h>
 
@@ -6,13 +7,10 @@
 #include "vector.h"
 #include "util.h"
 #include "err.h"
+#include "about.h"
 
 Ihandle *main_dlg = NULL,
-         *main_vbox,
-         *add_file_button, *add_dir_button,
-         *run_button, *quit_button,
-         *file_buttons_hbox, *run_buttons_hbox,
-         *file_list_frame, *file_list,
+         *file_list,
          *orpheus_field,
          *progress_dlg = NULL
                          ;
@@ -41,8 +39,8 @@ static void cat_transforms_to_runner( int *out_err );
 static void seal();
 
 static int cb_quit();
+static int cb_about();
 static int cb_run();
-static int cb_select_file();
 static int cb_drop_file( Ihandle *ih, const char *path );
 #define X_CLIENT(var, enum, human) Ihandle *var##_checkbox; \
 	bool var##_val; \
@@ -110,6 +108,14 @@ static int cb_quit() {
 	return IUP_CLOSE;
 }
 
+static int cb_about() {
+	Ihandle *about_dlg = IupMessageDlg();
+	IupSetAttribute( about_dlg, "VALUE", GRN_ABOUT_TEXT );
+	IupSetAttribute( about_dlg, "PARENTDIALOG", "main_dlg" );
+	IupPopup( about_dlg, IUP_CENTERPARENT, IUP_CENTERPARENT );
+	return IUP_DEFAULT;
+}
+
 static int cb_run() {
 	int in_err;
 
@@ -131,8 +137,17 @@ static int cb_run() {
 	return IUP_DEFAULT;
 }
 
+// for whatever reason, IUP uses url-encoding on filenames, which makes
+// special characters, well, special.
 static int cb_drop_file( Ihandle *ih, const char *path ) {
-	add_file( path );
+	int in_err;
+
+	char *utf8_path = grn_malloc( strlen( path ) + 1, &in_err );
+	exit_if_err( in_err );
+	grn_decode_url( utf8_path, path );
+	add_file( utf8_path );
+	// yeah, it won't get freed right if add_file fails, but who cares, not GTK for one
+	free( utf8_path );
 	return IUP_DEFAULT;
 }
 
@@ -158,11 +173,17 @@ static void cat_files_to_runner( int *out_err ) {
 	struct vector *tmp_all_files = vector_alloc( sizeof( char * ), out_err );
 	ERR_FW();
 	for ( int i = 0; i < vector_length( ui_files ); i++ ) {
-		// TODO: fastresume and resume.dat
 		char *this_ui_file = * ( char ** ) vector_get( ui_files, i );
 		GRN_LOG_DEBUG( "Sealing with UI file: '%s'", this_ui_file );
 		grn_cat_torrent_files( tmp_all_files, this_ui_file, NULL, out_err );
-		ERR_FW_CLEANUP();
+		if ( *out_err ) {
+			if ( grn_err_is_single_file( *out_err ) ) {
+				popup_err( *out_err );
+				*out_err = GRN_OK;
+			} else {
+				return;
+			}
+		}
 	}
 
 #define X_CLIENT(var, enum, human) if (var##_val) { \
@@ -203,6 +224,11 @@ static void cat_transforms_to_runner( int *out_err ) {
 
 static void seal( int *out_err ) {
 	*out_err = GRN_OK;
+
+	if ( vector_length( ui_files ) == 0 ) {
+		*out_err = GRN_ERR_NO_FILES;
+		return;
+	}
 
 	grn_ctx_free( grn_run_ctx, out_err );
 	ERR_FW();
@@ -259,22 +285,27 @@ static void setup_progress_dlg() {
 
 static void setup_main_dlg() {
 	////// RUN BUTTONS //////
-	quit_button = IupButton( "Quit", NULL );
+	Ihandle *quit_button = IupButton( "Quit", NULL );
 	IupSetAttribute( quit_button, "EXPAND", "HORIZONTAL" );
 	IupSetCallback( quit_button, "ACTION", ( Icallback )cb_quit );
 
-	run_button = IupButton( "Run", NULL );
+	Ihandle *about_button = IupButton( "About", NULL );
+	IupSetAttribute( about_button, "EXPAND", "HORIZONTAL" );
+	IupSetCallback( about_button, "ACTION", ( Icallback )cb_about );
+
+	Ihandle *run_button = IupButton( "Run", NULL );
 	IupSetAttribute( run_button, "EXPAND", "HORIZONTAL" );
 	IupSetCallback( run_button, "ACTION", ( Icallback )cb_run );
 
-	run_buttons_hbox = IupHbox( quit_button, run_button, 0 );
+	Ihandle *run_buttons_hbox = IupHbox( quit_button, about_button, run_button, 0 );
 	IupSetAttribute( run_buttons_hbox, "ALIGNMENT", "ABOTTOM" );
 	IupSetAttribute( run_buttons_hbox, "GAP", "10" );
 
 	////// FILE LIST //////
-	file_list = IupVbox( NULL );
-	IupSetAttribute( file_list, "GAP", "5" );
-	file_list_frame = IupFrame( file_list );
+	Ihandle *wide_file_item = IupLabel( "" );
+	IupSetAttribute( wide_file_item, "EXPAND", "HORIZONTAL" );
+	file_list = IupVbox( wide_file_item );
+	Ihandle *file_list_frame = IupFrame( file_list );
 	IupSetAttribute( file_list_frame, "TITLE", "To transform" );
 
 	////// FILE BUTTONS //////
@@ -295,26 +326,26 @@ static void setup_main_dlg() {
 	IupSetAttribute( orpheus_field, "CUEBANNER", "abcdef0123456789abcdef0123456789" );
 	IupSetAttribute( orpheus_field, "EXPAND", "HORIZONTAL" );
 
-	main_vbox = IupVbox(
-	                IupLabel( "Drag files into Greeny (optional):" ),
-	                file_list_frame,
+	Ihandle *main_vbox = IupVbox(
+	                         IupLabel( "Drag files into Greeny (optional):" ),
+	                         file_list_frame,
 //	                add_file_button,
 
-	                IupLabel( "Automatically transform all torrents for popular clients (optional):" ),
+	                         IupLabel( "Automatically transform all torrents for popular clients (optional):" ),
 #define X_CLIENT(var, enum, human) var##_checkbox,
 #include "x_clients.h"
 #undef X_CLIENT
-	                IupLabel( "Orpheus passphrase or announce URL:" ),
-	                orpheus_field,
-	                run_buttons_hbox,
-	                0
-	            );
+	                         IupLabel( "Orpheus passphrase or announce URL:" ),
+	                         orpheus_field,
+	                         run_buttons_hbox,
+	                         0
+	                     );
 	IupSetAttribute( main_vbox, "MARGIN", "10x10" );
 	IupSetAttribute( main_vbox, "GAP", "5" );
 
 	main_dlg = IupDialog( main_vbox );
 	IupSetHandle( "main_dlg", main_dlg );
-	IupSetAttribute( main_dlg, "MINSIZE", "300x350" );
+	IupSetAttribute( main_dlg, "MINSIZE", "300x450" );
 	IupSetAttribute( main_dlg, "SHRINK", "YES" );
 	IupSetAttribute( main_dlg, "TITLE", "GREENY" );
 	IupSetCallback( main_dlg, "DROPFILES_CB", ( Icallback ) cb_drop_file );
