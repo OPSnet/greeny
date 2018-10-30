@@ -4,11 +4,13 @@ make clean
 LDFLAGS='-static -s' make build/native/bin/greeny-cli
 LDFLAGS='-s' make
 mingw64-make clean
-LDFLAGS='-s' mingw64-make
+# for some reason, you cannot specify ldflags to mingw64-make without an override, which I don't really want
+mingw64-make
+x86_64-w64-mingw32-strip build/windows/bin/greeny{,-cli}.exe
 
-release_name="greeny-$(date '+%Y-%m-%d-%M:%S')"
+release_name="greeny-$(date '+%Y-%m-%d-%H:%M')"
 release_dir="build/$release_name"
-release_tarball="$release_dir.tar.gz"
 mkdir -p "$release_dir"
-cp build/native/bin/{greeny,greeny-cli} build/windows/bin/{greeny.exe,greeny-cli.exe} "$release_dir"
-tar czf "$release_tarball" -C build "$release_name"
+cp build/native/bin/greeny{,-cli} build/windows/bin/greeny{,-cli}.exe "$release_dir"
+for i in $release_dir/greeny*; do gpg -u greeny-signing -b "$i"; done
+gpg --export greeny-signing > "$release_dir/greeny-signing.pub"

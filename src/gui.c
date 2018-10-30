@@ -225,11 +225,6 @@ static void cat_transforms_to_runner( int *out_err ) {
 static void seal( int *out_err ) {
 	*out_err = GRN_OK;
 
-	if ( vector_length( ui_files ) == 0 ) {
-		*out_err = GRN_ERR_NO_FILES;
-		return;
-	}
-
 	grn_ctx_free( grn_run_ctx, out_err );
 	ERR_FW();
 	grn_run_ctx = grn_ctx_alloc( out_err );

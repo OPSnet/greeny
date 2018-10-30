@@ -93,13 +93,6 @@ static void die_if( struct cli_ctx *cli_ctx, int err ) {
 	}
 }
 
-static void die_if_fatal( struct cli_ctx *cli_ctx, int err ) {
-	if ( grn_err_is_fatal( err ) ) {
-		printf( "not implemented" );
-		die_silent( cli_ctx );
-	}
-}
-
 static void exit_kindly( struct cli_ctx *cli_ctx ) {
 	cli_ctx_free( cli_ctx );
 	puts( "Greeny is exiting normally." );
