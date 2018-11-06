@@ -27,7 +27,6 @@ struct cli_ctx {
 
 static void die_silent( struct cli_ctx *cli_ctx );
 static void die_if( struct cli_ctx *cli_ctx, int err );
-static void die_if_fatal( struct cli_ctx *cli_ctx, int err );
 static void exit_kindly( struct cli_ctx *cli_ctx );
 
 // allocate vectors

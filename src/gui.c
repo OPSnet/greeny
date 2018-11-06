@@ -297,10 +297,9 @@ static void setup_main_dlg() {
 	IupSetAttribute( run_buttons_hbox, "GAP", "10" );
 
 	////// FILE LIST //////
-	Ihandle *wide_file_item = IupLabel( "" );
-	IupSetAttribute( wide_file_item, "EXPAND", "HORIZONTAL" );
-	file_list = IupVbox( wide_file_item );
-	Ihandle *file_list_frame = IupFrame( file_list );
+	file_list = IupVbox( NULL );
+	Ihandle *file_list_scroller = IupScrollBox( file_list );
+	Ihandle *file_list_frame = IupFrame( file_list_scroller );
 	IupSetAttribute( file_list_frame, "TITLE", "To transform" );
 
 	////// FILE BUTTONS //////
@@ -322,11 +321,11 @@ static void setup_main_dlg() {
 	IupSetAttribute( orpheus_field, "EXPAND", "HORIZONTAL" );
 
 	Ihandle *main_vbox = IupVbox(
-	                         IupLabel( "Drag files into Greeny (optional):" ),
+	                         IupLabel( "Drag files or folders into Greeny (optional):" ),
 	                         file_list_frame,
 //	                add_file_button,
 
-	                         IupLabel( "Automatically transform all torrents for popular clients (optional):" ),
+	                         IupLabel( "Auto-find torrents for popular clients (optional):" ),
 #define X_CLIENT(var, enum, human) var##_checkbox,
 #include "x_clients.h"
 #undef X_CLIENT
@@ -340,7 +339,7 @@ static void setup_main_dlg() {
 
 	main_dlg = IupDialog( main_vbox );
 	IupSetHandle( "main_dlg", main_dlg );
-	IupSetAttribute( main_dlg, "MINSIZE", "300x450" );
+	IupSetAttribute( main_dlg, "MINSIZE", "400x400" );
 	IupSetAttribute( main_dlg, "SHRINK", "YES" );
 	IupSetAttribute( main_dlg, "TITLE", "GREENY" );
 	IupSetCallback( main_dlg, "DROPFILES_CB", ( Icallback ) cb_drop_file );

@@ -593,6 +593,8 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	*out_err = GRN_OK;
 	assert( ctx->state == GRN_CTX_TRANSFORM );
 
+	struct bencode *main_dict = NULL;
+
 	// BEGIN SHITTY DELUGE FUCKING SHIT THAT NEEDS TO BE LESIONED
 	if ( str_ends_with( grn_ctx_get_c_path( ctx ), "torrents.state" ) ) {
 		GRN_LOG_DEBUG( "Doing deluge .state transform%s", "" );
@@ -624,7 +626,7 @@ void transform_buffer( struct grn_ctx *ctx, int *out_err ) {
 	f_traversing = vector_alloc( sizeof( struct bencode * ), out_err );
 	ERR_FW_CLEANUP();
 
-	struct bencode *main_dict = ben_decode_grn( ctx->buffer, ctx->buffer_n, out_err );
+	main_dict = ben_decode_grn( ctx->buffer, ctx->buffer_n, out_err );
 	ERR_FW_CLEANUP();
 
 	for ( int i = 0; i < ctx->transforms_n; i++ ) {
@@ -938,9 +940,9 @@ void grn_cat_client( struct vector *vec, int client, int *out_err ) {
 			cat_client_single_path( vec, home_path, "/.local/share/data/qBittorrent/BT_backup", ".fastresume", out_err );
 			ERR_FW();
 #elif defined __APPLE__
-			cat_client_single_path( vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".torrent", out_err );
+			cat_client_single_path( vec, home_path, "/Library/Application Support/qBittorrent/BT_backup", ".torrent", out_err );
 			ERR_FW();
-			cat_client_single_path( vec, home_path, "/Library/Application Suppport/qBittorrent/BT_backup", ".fastresume", out_err );
+			cat_client_single_path( vec, home_path, "/Library/Application Support/qBittorrent/BT_backup", ".fastresume", out_err );
 			ERR_FW();
 #elif defined _WIN32
 			cat_client_single_path( vec, home_path, "/AppData/Local/qBittorrent/BT_backup", ".torrent", out_err );
