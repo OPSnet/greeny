@@ -300,7 +300,7 @@ static void setup_main_dlg() {
 	file_list = IupVbox( NULL );
 	Ihandle *file_list_scroller = IupScrollBox( file_list );
 	Ihandle *file_list_frame = IupFrame( file_list_scroller );
-	IupSetAttribute( file_list_frame, "TITLE", "To transform" );
+	IupSetAttribute( file_list_frame, "TITLE", "Drag in files (optional)" );
 
 	////// FILE BUTTONS //////
 	/*
@@ -321,9 +321,7 @@ static void setup_main_dlg() {
 	IupSetAttribute( orpheus_field, "EXPAND", "HORIZONTAL" );
 
 	Ihandle *main_vbox = IupVbox(
-	                         IupLabel( "Drag files or folders into Greeny (optional):" ),
 	                         file_list_frame,
-//	                add_file_button,
 
 	                         IupLabel( "Auto-find torrents for popular clients (optional):" ),
 #define X_CLIENT(var, enum, human) var##_checkbox,
@@ -350,5 +348,6 @@ static void setup_dlgs() {
 	setup_main_dlg();
 	setup_progress_dlg();
 }
+
 
 
