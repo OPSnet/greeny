@@ -1,5 +1,9 @@
 Greeny is the Graphical, Really Easy Editor for torreNts, Yup!
 
+## I want to run Greeny
+
+STOP! Go to https://github.com/opsnet/greeny/releases and download Greeny from there. The rest of the instructions on this page are for developers only!
+
 ## Linux & Mac Dependencies
 
 * GCC (clang will probably work too, but praise Stallman!)
